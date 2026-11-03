@@ -18,6 +18,8 @@ import com.kunvarpreet.ascend.ui.dashboard.DashboardViewModel
 import com.kunvarpreet.ascend.ui.evolution.EvolutionScreen
 import com.kunvarpreet.ascend.ui.shop.ShopScreen
 import com.kunvarpreet.ascend.ui.status.StatusScreen
+import com.kunvarpreet.ascend.ui.workout.WorkoutScreen
+import com.kunvarpreet.ascend.ui.workout.WorkoutViewModel
 
 @Composable
 fun AscendApp(
@@ -78,12 +80,13 @@ fun AscendApp(
                 EvolutionScreen()
             }
 
-            // Stub routes for next incremental screens (S05 TapToLog & S06 GPS Run)
             composable(Screen.Workout.route) { backStackEntry ->
                 val targetId = backStackEntry.arguments?.getString("targetId") ?: ""
-                DashboardScreen(
-                    viewModel = viewModel(),
-                    onTargetClick = {}
+                val workoutViewModel: WorkoutViewModel = viewModel()
+                WorkoutScreen(
+                    targetId = targetId,
+                    viewModel = workoutViewModel,
+                    onBack = { navController.popBackStack() }
                 )
             }
 

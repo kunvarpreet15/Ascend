@@ -208,14 +208,16 @@ class AscendDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
     }
 
     fun refreshCache() {
-        val db = readableDatabase
+        val db = writableDatabase
         val todayIso = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
 
-        // Query Hunter
+        // 1. Query or initialize Hunter
+        var hunterId = ""
         val hunterCursor: Cursor = db.rawQuery("SELECT * FROM hunter_profiles LIMIT 1", null)
         if (hunterCursor.moveToFirst()) {
+            hunterId = hunterCursor.getString(hunterCursor.getColumnIndexOrThrow("id"))
             val profile = HunterProfile(
-                id = hunterCursor.getString(hunterCursor.getColumnIndexOrThrow("id")),
+                id = hunterId,
                 alias = hunterCursor.getString(hunterCursor.getColumnIndexOrThrow("alias")),
                 avatarId = hunterCursor.getString(hunterCursor.getColumnIndexOrThrow("avatar_id")),
                 level = hunterCursor.getInt(hunterCursor.getColumnIndexOrThrow("level")),
@@ -236,8 +238,17 @@ class AscendDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
         }
         hunterCursor.close()
 
-        // Query Today's Quest
-        val questCursor = db.rawQuery("SELECT * FROM daily_quests WHERE quest_date = ? LIMIT 1", arrayOf(todayIso))
+        if (hunterId.isEmpty()) return
+
+        // 2. Query Today's Quest, or auto-generate for a new day
+        var questCursor = db.rawQuery("SELECT * FROM daily_quests WHERE quest_date = ? LIMIT 1", arrayOf(todayIso))
+        if (!questCursor.moveToFirst()) {
+            questCursor.close()
+            // Auto-generate today's quest deck for new calendar day
+            ensureTodayQuestExists(db, hunterId, todayIso)
+            questCursor = db.rawQuery("SELECT * FROM daily_quests WHERE quest_date = ? LIMIT 1", arrayOf(todayIso))
+        }
+
         if (questCursor.moveToFirst()) {
             val questId = questCursor.getString(questCursor.getColumnIndexOrThrow("id"))
             val statusStr = questCursor.getString(questCursor.getColumnIndexOrThrow("status"))
@@ -273,7 +284,7 @@ class AscendDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
 
             val quest = DailyQuest(
                 id = questId,
-                hunterId = _hunterState.value?.id ?: "",
+                hunterId = hunterId,
                 questDate = todayIso,
                 status = try { QuestStatus.valueOf(statusStr) } catch (e: Exception) { QuestStatus.PENDING },
                 xpReward = xpReward,
@@ -286,15 +297,64 @@ class AscendDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
         questCursor.close()
     }
 
-    fun addProgressToTarget(targetId: String, increment: Float): Boolean {
-        val db = writableDatabase
+    private fun ensureTodayQuestExists(db: SQLiteDatabase, hunterId: String, todayIso: String) {
+        val now = System.currentTimeMillis()
+        val questId = UUID.randomUUID().toString()
+
         db.beginTransaction()
         try {
-            val cursor = db.rawQuery("SELECT completed_quantity, target_quantity, quest_id FROM exercise_targets WHERE id = ?", arrayOf(targetId))
+            val questValues = ContentValues().apply {
+                put("id", questId)
+                put("hunter_id", hunterId)
+                put("quest_date", todayIso)
+                put("status", "PENDING")
+                put("xp_reward", 100)
+                put("gold_reward", 50)
+                put("created_at", now)
+            }
+            db.insert("daily_quests", null, questValues)
+
+            val targets = listOf(
+                Triple(ExerciseType.PUSH_UPS, 100f, ExerciseUnit.REPS),
+                Triple(ExerciseType.SIT_UPS, 100f, ExerciseUnit.REPS),
+                Triple(ExerciseType.SQUATS, 100f, ExerciseUnit.REPS),
+                Triple(ExerciseType.RUNNING, 3000f, ExerciseUnit.METERS)
+            )
+
+            for ((type, quantity, unit) in targets) {
+                val targetValues = ContentValues().apply {
+                    put("id", UUID.randomUUID().toString())
+                    put("quest_id", questId)
+                    put("exercise_type", type.name)
+                    put("target_quantity", quantity)
+                    put("completed_quantity", 0f)
+                    put("unit", unit.name)
+                    put("is_completed", 0)
+                }
+                db.insert("exercise_targets", null, targetValues)
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    fun addProgressToTarget(targetId: String, increment: Float): Boolean {
+        if (increment <= 0f) return false
+
+        val db = writableDatabase
+        var questCompletedJustNow = false
+        var xpToAward = 0L
+        var goldToAward = 0L
+
+        db.beginTransaction()
+        try {
+            val cursor = db.rawQuery("SELECT completed_quantity, target_quantity, quest_id, exercise_type FROM exercise_targets WHERE id = ?", arrayOf(targetId))
             if (cursor.moveToFirst()) {
                 val current = cursor.getFloat(cursor.getColumnIndexOrThrow("completed_quantity"))
                 val target = cursor.getFloat(cursor.getColumnIndexOrThrow("target_quantity"))
                 val questId = cursor.getString(cursor.getColumnIndexOrThrow("quest_id"))
+                val exType = cursor.getString(cursor.getColumnIndexOrThrow("exercise_type"))
                 cursor.close()
 
                 val newCompleted = current + increment
@@ -306,14 +366,38 @@ class AscendDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
                 }
                 db.update("exercise_targets", values, "id = ?", arrayOf(targetId))
 
+                // Insert into workout_session_logs
+                val now = System.currentTimeMillis()
+                val logValues = ContentValues().apply {
+                    put("id", UUID.randomUUID().toString())
+                    put("target_id", targetId)
+                    put("exercise_type", exType)
+                    put("start_time", now - 60000)
+                    put("end_time", now)
+                    put("total_reps_or_meters", increment)
+                    put("duration_seconds", 60)
+                    put("sets_data_json", "[{\"reps\":$increment,\"timestamp\":$now}]")
+                    put("created_at", now)
+                }
+                db.insert("workout_session_logs", null, logValues)
+
                 // Check if all targets for this quest are completed
                 val remainingCursor = db.rawQuery("SELECT COUNT(*) FROM exercise_targets WHERE quest_id = ? AND is_completed = 0", arrayOf(questId))
                 if (remainingCursor.moveToFirst() && remainingCursor.getInt(0) == 0) {
                     val questValues = ContentValues().apply {
                         put("status", "COMPLETED")
-                        put("completed_at", System.currentTimeMillis())
+                        put("completed_at", now)
                     }
                     db.update("daily_quests", questValues, "id = ?", arrayOf(questId))
+
+                    // Read rewards
+                    val rewardCursor = db.rawQuery("SELECT xp_reward, gold_reward FROM daily_quests WHERE id = ?", arrayOf(questId))
+                    if (rewardCursor.moveToFirst()) {
+                        xpToAward = rewardCursor.getLong(rewardCursor.getColumnIndexOrThrow("xp_reward"))
+                        goldToAward = rewardCursor.getLong(rewardCursor.getColumnIndexOrThrow("gold_reward"))
+                        questCompletedJustNow = true
+                    }
+                    rewardCursor.close()
                 }
                 remainingCursor.close()
 
@@ -324,7 +408,13 @@ class AscendDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
         } finally {
             db.endTransaction()
         }
-        refreshCache()
+
+        // Award rewards outside transaction
+        if (questCompletedJustNow && (xpToAward > 0 || goldToAward > 0)) {
+            awardXpAndGold(xpToAward, goldToAward)
+        } else {
+            refreshCache()
+        }
         return true
     }
 
@@ -332,7 +422,7 @@ class AscendDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
         val db = writableDatabase
         db.beginTransaction()
         try {
-            val cursor = db.rawQuery("SELECT id, level, current_xp, xp_to_next_level, available_stat_points, gold_balance FROM hunter_profiles LIMIT 1", null)
+            val cursor = db.rawQuery("SELECT id, level, current_xp, xp_to_next_level, available_stat_points, gold_balance, rank_tier FROM hunter_profiles LIMIT 1", null)
             if (cursor.moveToFirst()) {
                 val id = cursor.getString(cursor.getColumnIndexOrThrow("id"))
                 var level = cursor.getInt(cursor.getColumnIndexOrThrow("level"))
@@ -349,12 +439,24 @@ class AscendDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
                     xpToNext = (100 * Math.pow(level.toDouble(), 1.5)).toLong()
                 }
 
+                // Update rank tier based on new level
+                val newRankTier = when {
+                    level >= 150 -> "SSS"
+                    level >= 100 -> "S"
+                    level >= 70 -> "A"
+                    level >= 45 -> "B"
+                    level >= 25 -> "C"
+                    level >= 10 -> "D"
+                    else -> "E"
+                }
+
                 val values = ContentValues().apply {
                     put("level", level)
                     put("current_xp", currentXp)
                     put("xp_to_next_level", xpToNext)
                     put("available_stat_points", statPoints)
                     put("gold_balance", currentGold)
+                    put("rank_tier", newRankTier)
                     put("updated_at", System.currentTimeMillis())
                 }
                 db.update("hunter_profiles", values, "id = ?", arrayOf(id))
