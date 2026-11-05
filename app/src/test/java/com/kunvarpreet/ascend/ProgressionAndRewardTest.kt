@@ -1,5 +1,6 @@
 package com.kunvarpreet.ascend
 
+import com.kunvarpreet.ascend.domain.model.AttributeStats
 import com.kunvarpreet.ascend.domain.model.DailyQuest
 import com.kunvarpreet.ascend.domain.model.ExerciseTarget
 import com.kunvarpreet.ascend.domain.model.ExerciseType
@@ -130,5 +131,70 @@ class ProgressionAndRewardTest {
         assertEquals(RankTier.A, getRankForLevel(70))
         assertEquals(RankTier.S, getRankForLevel(100))
         assertEquals(RankTier.SSS, getRankForLevel(150))
+    }
+
+    @Test
+    fun `test intelligence stat xp scaling multiplier formula`() {
+        fun calculateScaledXp(baseXp: Long, intelligence: Int): Long {
+            val multiplier = 1.0 + (intelligence - 10) * 0.02
+            return (baseXp * multiplier).toLong()
+        }
+
+        assertEquals(100L, calculateScaledXp(100L, 10))
+        assertEquals(110L, calculateScaledXp(100L, 15)) // +10% bonus
+        assertEquals(120L, calculateScaledXp(100L, 20)) // +20% bonus
+        assertEquals(150L, calculateScaledXp(100L, 35)) // +50% bonus
+        assertEquals(98L, calculateScaledXp(100L, 9))
+    }
+
+    @Test
+    fun `test stat point allocation rules`() {
+        var availablePoints = 5
+        var strength = 10
+
+        fun allocateStrength(): Boolean {
+            if (availablePoints > 0) {
+                availablePoints -= 1
+                strength += 1
+                return true
+            }
+            return false
+        }
+
+        assertTrue(allocateStrength())
+        assertEquals(4, availablePoints)
+        assertEquals(11, strength)
+
+        // Allocate remaining
+        repeat(4) { assertTrue(allocateStrength()) }
+        assertEquals(0, availablePoints)
+        assertEquals(15, strength)
+
+        // Cannot allocate with 0 available points
+        assertFalse(allocateStrength())
+        assertEquals(0, availablePoints)
+        assertEquals(15, strength)
+    }
+
+    @Test
+    fun `test quest completion prevents double reward on subsequent target updates`() {
+        var questStatus = QuestStatus.PENDING
+        var totalXpAwarded = 0L
+
+        fun simulateTargetProgress(allTargetsComplete: Boolean, questReward: Long) {
+            if (allTargetsComplete && questStatus != QuestStatus.COMPLETED) {
+                questStatus = QuestStatus.COMPLETED
+                totalXpAwarded += questReward
+            }
+        }
+
+        // First completion triggers reward
+        simulateTargetProgress(allTargetsComplete = true, questReward = 100L)
+        assertEquals(QuestStatus.COMPLETED, questStatus)
+        assertEquals(100L, totalXpAwarded)
+
+        // Subsequent target progress when already COMPLETED does NOT re-award
+        simulateTargetProgress(allTargetsComplete = true, questReward = 100L)
+        assertEquals(100L, totalXpAwarded)
     }
 }

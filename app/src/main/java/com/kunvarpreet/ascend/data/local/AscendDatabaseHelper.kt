@@ -26,12 +26,15 @@ class AscendDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
     private val _hunterState = MutableStateFlow<HunterProfile?>(null)
     val hunterState: StateFlow<HunterProfile?> = _hunterState.asStateFlow()
 
+    private val _statsState = MutableStateFlow<AttributeStats?>(null)
+    val statsState: StateFlow<AttributeStats?> = _statsState.asStateFlow()
+
     private val _todayQuestState = MutableStateFlow<DailyQuest?>(null)
     val todayQuestState: StateFlow<DailyQuest?> = _todayQuestState.asStateFlow()
 
     companion object {
         const val DATABASE_NAME = "ascend_rpg.db"
-        const val DATABASE_VERSION = 1
+        const val DATABASE_VERSION = 2
 
         @Volatile
         private var instance: AscendDatabaseHelper? = null
@@ -81,6 +84,7 @@ class AscendDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
                 FOREIGN KEY (hunter_id) REFERENCES hunter_profiles(id) ON DELETE CASCADE
             );
         """.trimIndent())
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_attribute_stats_hunter ON attribute_stats(hunter_id);")
 
         // Table: daily_quests
         db.execSQL("""
@@ -96,6 +100,8 @@ class AscendDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
                 FOREIGN KEY (hunter_id) REFERENCES hunter_profiles(id) ON DELETE CASCADE
             );
         """.trimIndent())
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_quests_date ON daily_quests(hunter_id, quest_date);")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_daily_quests_status ON daily_quests(status);")
 
         // Table: exercise_targets
         db.execSQL("""
@@ -110,6 +116,7 @@ class AscendDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
                 FOREIGN KEY (quest_id) REFERENCES daily_quests(id) ON DELETE CASCADE
             );
         """.trimIndent())
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_exercise_targets_quest ON exercise_targets(quest_id);")
 
         // Table: workout_session_logs
         db.execSQL("""
@@ -126,16 +133,84 @@ class AscendDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
                 FOREIGN KEY (target_id) REFERENCES exercise_targets(id) ON DELETE CASCADE
             );
         """.trimIndent())
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_workout_logs_target ON workout_session_logs(target_id);")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_workout_logs_created ON workout_session_logs(created_at);")
+
+        // Table: run_gps_logs
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS run_gps_logs (
+                id TEXT PRIMARY KEY NOT NULL,
+                workout_session_id TEXT NOT NULL,
+                distance_meters REAL NOT NULL,
+                avg_pace_sec_per_km REAL NOT NULL,
+                elevation_gain_meters REAL DEFAULT 0.0,
+                calories_burned INTEGER NOT NULL DEFAULT 0,
+                gps_path_geojson TEXT NOT NULL DEFAULT '[]',
+                created_at INTEGER NOT NULL,
+                FOREIGN KEY (workout_session_id) REFERENCES workout_session_logs(id) ON DELETE CASCADE
+            );
+        """.trimIndent())
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_run_gps_session ON run_gps_logs(workout_session_id);")
+
+        // Table: penalty_logs
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS penalty_logs (
+                id TEXT PRIMARY KEY NOT NULL,
+                hunter_id TEXT NOT NULL,
+                triggered_date TEXT NOT NULL,
+                penalty_task_description TEXT NOT NULL,
+                is_cleared INTEGER NOT NULL DEFAULT 0,
+                cleared_at INTEGER,
+                created_at INTEGER NOT NULL,
+                FOREIGN KEY (hunter_id) REFERENCES hunter_profiles(id) ON DELETE CASCADE
+            );
+        """.trimIndent())
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_penalty_logs_hunter ON penalty_logs(hunter_id, triggered_date);")
+
+        // Table: inventory_items
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS inventory_items (
+                id TEXT PRIMARY KEY NOT NULL,
+                hunter_id TEXT NOT NULL,
+                item_code TEXT NOT NULL
+                    CHECK (item_code IN ('STREAK_SHIELD','STAMINA_POTION','TITLE_SHADOW_NOVICE','TITLE_ASCENDED_WARRIOR')),
+                item_name TEXT NOT NULL,
+                quantity INTEGER NOT NULL DEFAULT 1,
+                acquired_at INTEGER NOT NULL,
+                FOREIGN KEY (hunter_id) REFERENCES hunter_profiles(id) ON DELETE CASCADE
+            );
+        """.trimIndent())
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_inventory_hunter ON inventory_items(hunter_id);")
+
+        // Table: body_evolution_logs
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS body_evolution_logs (
+                id TEXT PRIMARY KEY NOT NULL,
+                hunter_id TEXT NOT NULL,
+                log_date TEXT NOT NULL,
+                weight_kg REAL NOT NULL,
+                photo_file_path TEXT,
+                notes TEXT,
+                created_at INTEGER NOT NULL,
+                FOREIGN KEY (hunter_id) REFERENCES hunter_profiles(id) ON DELETE CASCADE
+            );
+        """.trimIndent())
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_body_evolution_hunter ON body_evolution_logs(hunter_id, log_date);")
 
         // Seed initial data
         seedInitialData(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        // Migration logic for future schema increments
+        onCreate(db)
     }
 
     private fun seedInitialData(db: SQLiteDatabase) {
+        val check = db.rawQuery("SELECT COUNT(*) FROM hunter_profiles", null)
+        val hasHunter = check.moveToFirst() && check.getInt(0) > 0
+        check.close()
+        if (hasHunter) return
+
         val now = System.currentTimeMillis()
         val hunterId = UUID.randomUUID().toString()
         val todayIso = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(now))
@@ -240,7 +315,22 @@ class AscendDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
 
         if (hunterId.isEmpty()) return
 
-        // 2. Query Today's Quest, or auto-generate for a new day
+        // 2. Query Attribute Stats
+        val statsCursor = db.rawQuery("SELECT * FROM attribute_stats WHERE hunter_id = ? LIMIT 1", arrayOf(hunterId))
+        if (statsCursor.moveToFirst()) {
+            val stats = AttributeStats(
+                hunterId = hunterId,
+                strength = statsCursor.getInt(statsCursor.getColumnIndexOrThrow("strength")),
+                agility = statsCursor.getInt(statsCursor.getColumnIndexOrThrow("agility")),
+                sense = statsCursor.getInt(statsCursor.getColumnIndexOrThrow("sense")),
+                vitality = statsCursor.getInt(statsCursor.getColumnIndexOrThrow("vitality")),
+                intelligence = statsCursor.getInt(statsCursor.getColumnIndexOrThrow("intelligence"))
+            )
+            _statsState.value = stats
+        }
+        statsCursor.close()
+
+        // 3. Query Today's Quest, or auto-generate for a new day
         var questCursor = db.rawQuery("SELECT * FROM daily_quests WHERE quest_date = ? LIMIT 1", arrayOf(todayIso))
         if (!questCursor.moveToFirst()) {
             questCursor.close()
@@ -339,6 +429,47 @@ class AscendDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
         }
     }
 
+    fun allocateStatPoint(statKey: String): Boolean {
+        val column = when (statKey.lowercase()) {
+            "strength", "str" -> "strength"
+            "agility", "agi" -> "agility"
+            "sense", "sen" -> "sense"
+            "vitality", "vit" -> "vitality"
+            "intelligence", "int" -> "intelligence"
+            else -> return false
+        }
+
+        val db = writableDatabase
+        var success = false
+
+        db.beginTransaction()
+        try {
+            val cursor = db.rawQuery("SELECT id, available_stat_points FROM hunter_profiles LIMIT 1", null)
+            if (cursor.moveToFirst()) {
+                val hunterId = cursor.getString(cursor.getColumnIndexOrThrow("id"))
+                val availablePoints = cursor.getInt(cursor.getColumnIndexOrThrow("available_stat_points"))
+                if (availablePoints > 0) {
+                    val hunterValues = ContentValues().apply {
+                        put("available_stat_points", availablePoints - 1)
+                        put("updated_at", System.currentTimeMillis())
+                    }
+                    db.update("hunter_profiles", hunterValues, "id = ?", arrayOf(hunterId))
+                    db.execSQL("UPDATE attribute_stats SET $column = $column + 1 WHERE hunter_id = ?", arrayOf(hunterId))
+                    db.setTransactionSuccessful()
+                    success = true
+                }
+            }
+            cursor.close()
+        } finally {
+            db.endTransaction()
+        }
+
+        if (success) {
+            refreshCache()
+        }
+        return success
+    }
+
     fun addProgressToTarget(targetId: String, increment: Float): Boolean {
         if (increment <= 0f) return false
 
@@ -381,23 +512,25 @@ class AscendDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
                 }
                 db.insert("workout_session_logs", null, logValues)
 
-                // Check if all targets for this quest are completed
+                // Check if all targets for this quest are completed and verify quest is not already COMPLETED
                 val remainingCursor = db.rawQuery("SELECT COUNT(*) FROM exercise_targets WHERE quest_id = ? AND is_completed = 0", arrayOf(questId))
                 if (remainingCursor.moveToFirst() && remainingCursor.getInt(0) == 0) {
-                    val questValues = ContentValues().apply {
-                        put("status", "COMPLETED")
-                        put("completed_at", now)
-                    }
-                    db.update("daily_quests", questValues, "id = ?", arrayOf(questId))
+                    val questCheckCursor = db.rawQuery("SELECT status, xp_reward, gold_reward FROM daily_quests WHERE id = ?", arrayOf(questId))
+                    if (questCheckCursor.moveToFirst()) {
+                        val currentStatus = questCheckCursor.getString(questCheckCursor.getColumnIndexOrThrow("status"))
+                        if (currentStatus != "COMPLETED") {
+                            val questValues = ContentValues().apply {
+                                put("status", "COMPLETED")
+                                put("completed_at", now)
+                            }
+                            db.update("daily_quests", questValues, "id = ?", arrayOf(questId))
 
-                    // Read rewards
-                    val rewardCursor = db.rawQuery("SELECT xp_reward, gold_reward FROM daily_quests WHERE id = ?", arrayOf(questId))
-                    if (rewardCursor.moveToFirst()) {
-                        xpToAward = rewardCursor.getLong(rewardCursor.getColumnIndexOrThrow("xp_reward"))
-                        goldToAward = rewardCursor.getLong(rewardCursor.getColumnIndexOrThrow("gold_reward"))
-                        questCompletedJustNow = true
+                            xpToAward = questCheckCursor.getLong(questCheckCursor.getColumnIndexOrThrow("xp_reward"))
+                            goldToAward = questCheckCursor.getLong(questCheckCursor.getColumnIndexOrThrow("gold_reward"))
+                            questCompletedJustNow = true
+                        }
                     }
-                    rewardCursor.close()
+                    questCheckCursor.close()
                 }
                 remainingCursor.close()
 
@@ -426,7 +559,19 @@ class AscendDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
             if (cursor.moveToFirst()) {
                 val id = cursor.getString(cursor.getColumnIndexOrThrow("id"))
                 var level = cursor.getInt(cursor.getColumnIndexOrThrow("level"))
-                var currentXp = cursor.getLong(cursor.getColumnIndexOrThrow("current_xp")) + xp
+
+                // Intelligence scaling: multiply XP earned by 1.0 + (intelligence - 10) * 0.02
+                var intelligence = 10
+                val statsCursor = db.rawQuery("SELECT intelligence FROM attribute_stats WHERE hunter_id = ? LIMIT 1", arrayOf(id))
+                if (statsCursor.moveToFirst()) {
+                    intelligence = statsCursor.getInt(statsCursor.getColumnIndexOrThrow("intelligence"))
+                }
+                statsCursor.close()
+
+                val multiplier = 1.0 + (intelligence - 10) * 0.02
+                val scaledXp = (xp * multiplier).toLong()
+
+                var currentXp = cursor.getLong(cursor.getColumnIndexOrThrow("current_xp")) + scaledXp
                 var xpToNext = cursor.getLong(cursor.getColumnIndexOrThrow("xp_to_next_level"))
                 var statPoints = cursor.getInt(cursor.getColumnIndexOrThrow("available_stat_points"))
                 val currentGold = cursor.getLong(cursor.getColumnIndexOrThrow("gold_balance")) + gold
