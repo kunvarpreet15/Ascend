@@ -66,7 +66,7 @@ class AscendDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
                 gold_balance INTEGER NOT NULL DEFAULT 100,
                 height_cm REAL NOT NULL DEFAULT 175.0,
                 weight_kg REAL NOT NULL DEFAULT 70.0,
-                is_onboarded INTEGER NOT NULL DEFAULT 1,
+                is_onboarded INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             );
@@ -230,7 +230,7 @@ class AscendDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
             put("gold_balance", 100)
             put("height_cm", 175.0)
             put("weight_kg", 70.0)
-            put("is_onboarded", 1)
+            put("is_onboarded", 0)
             put("created_at", now)
             put("updated_at", now)
         }
@@ -612,5 +612,93 @@ class AscendDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
             db.endTransaction()
         }
         refreshCache()
+    }
+
+    fun saveOnboardingProfile(alias: String, heightCm: Float, weightKg: Float, difficultyMultiplier: Float): Boolean {
+        val db = writableDatabase
+        val now = System.currentTimeMillis()
+        var success = false
+
+        db.beginTransaction()
+        try {
+            val cursor = db.rawQuery("SELECT id FROM hunter_profiles LIMIT 1", null)
+            if (cursor.moveToFirst()) {
+                val hunterId = cursor.getString(0)
+                val values = ContentValues().apply {
+                    put("alias", alias.ifBlank { "SHADOW_HUNTER" })
+                    put("height_cm", heightCm)
+                    put("weight_kg", weightKg)
+                    put("is_onboarded", 1)
+                    put("updated_at", now)
+                }
+                db.update("hunter_profiles", values, "id = ?", arrayOf(hunterId))
+
+                // Scale today's quest targets if multiplier != 1.0f
+                if (difficultyMultiplier > 0f && difficultyMultiplier != 1.0f) {
+                    val targetsCursor = db.rawQuery(
+                        "SELECT id, exercise_type FROM exercise_targets WHERE quest_id IN (SELECT id FROM daily_quests WHERE hunter_id = ?)",
+                        arrayOf(hunterId)
+                    )
+                    while (targetsCursor.moveToNext()) {
+                        val targetId = targetsCursor.getString(0)
+                        val exType = targetsCursor.getString(1)
+                        val baseQty = when (exType) {
+                            "PUSH_UPS", "SIT_UPS", "SQUATS" -> 100f
+                            "RUNNING" -> 3000f
+                            else -> 100f
+                        }
+                        val newTarget = baseQty * difficultyMultiplier
+                        val targetValues = ContentValues().apply {
+                            put("target_quantity", newTarget)
+                        }
+                        db.update("exercise_targets", targetValues, "id = ?", arrayOf(targetId))
+                    }
+                    targetsCursor.close()
+                }
+                db.setTransactionSuccessful()
+                success = true
+            }
+            cursor.close()
+        } finally {
+            db.endTransaction()
+        }
+
+        if (success) {
+            refreshCache()
+        }
+        return success
+    }
+
+    fun logRunGps(
+        targetId: String,
+        distanceMeters: Float,
+        durationSeconds: Int,
+        avgPaceSecPerKm: Float,
+        caloriesBurned: Int,
+        gpsPathGeoJson: String = "[]"
+    ): Boolean {
+        val db = writableDatabase
+        val now = System.currentTimeMillis()
+        var linkedSessionId = UUID.randomUUID().toString()
+        val cursor = db.rawQuery(
+            "SELECT id FROM workout_session_logs WHERE target_id = ? ORDER BY created_at DESC LIMIT 1",
+            arrayOf(targetId)
+        )
+        if (cursor.moveToFirst()) {
+            linkedSessionId = cursor.getString(0)
+        }
+        cursor.close()
+
+        val values = ContentValues().apply {
+            put("id", UUID.randomUUID().toString())
+            put("workout_session_id", linkedSessionId)
+            put("distance_meters", distanceMeters)
+            put("avg_pace_sec_per_km", avgPaceSecPerKm)
+            put("elevation_gain_meters", 0.0)
+            put("calories_burned", caloriesBurned)
+            put("gps_path_geojson", gpsPathGeoJson)
+            put("created_at", now)
+        }
+        return db.insert("run_gps_logs", null, values) > 0
     }
 }

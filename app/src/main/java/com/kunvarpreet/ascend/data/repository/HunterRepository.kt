@@ -16,6 +16,10 @@ class HunterRepository(context: Context) {
         return dbHelper.allocateStatPoint(statKey)
     }
 
+    fun saveOnboardingProfile(alias: String, heightCm: Float, weightKg: Float, difficultyMultiplier: Float): Boolean {
+        return dbHelper.saveOnboardingProfile(alias, heightCm, weightKg, difficultyMultiplier)
+    }
+
     fun addXpAndGold(xp: Long, gold: Long) {
         dbHelper.awardXpAndGold(xp, gold)
     }

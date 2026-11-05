@@ -1,6 +1,7 @@
 package com.kunvarpreet.ascend.ui.navigation
 
 sealed class Screen(val route: String) {
+    object Onboarding : Screen("onboarding")
     object Dashboard : Screen("dashboard")
     object Workout : Screen("workout/{targetId}") {
         fun createRoute(targetId: String) = "workout/$targetId"

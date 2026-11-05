@@ -14,6 +14,17 @@ class QuestRepository(context: Context) {
         return dbHelper.addProgressToTarget(targetId, increment)
     }
 
+    fun logRunGps(
+        targetId: String,
+        distanceMeters: Float,
+        durationSeconds: Int,
+        avgPaceSecPerKm: Float,
+        caloriesBurned: Int,
+        gpsPathGeoJson: String = "[]"
+    ): Boolean {
+        return dbHelper.logRunGps(targetId, distanceMeters, durationSeconds, avgPaceSecPerKm, caloriesBurned, gpsPathGeoJson)
+    }
+
     fun refresh() {
         dbHelper.refreshCache()
     }

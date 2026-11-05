@@ -197,4 +197,64 @@ class ProgressionAndRewardTest {
         simulateTargetProgress(allTargetsComplete = true, questReward = 100L)
         assertEquals(100L, totalXpAwarded)
     }
+
+    @Test
+    fun `test haversine distance calculates accurate meters between GPS coordinates`() {
+        fun haversineMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+            val r = 6371000.0
+            val dLat = Math.toRadians(lat2 - lat1)
+            val dLon = Math.toRadians(lon2 - lon1)
+            val a = Math.sin(dLat / 2).let { it * it } +
+                    Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
+                    Math.sin(dLon / 2).let { it * it }
+            val c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+            return r * c
+        }
+
+        // Distance between two points ~111 meters apart on meridian
+        val dist = haversineMeters(37.4220, -122.0840, 37.4230, -122.0840)
+        assertEquals(111.0, dist, 1.0)
+    }
+
+    @Test
+    fun `test running pace calculation format`() {
+        fun calculatePace(meters: Float, seconds: Int): String {
+            if (meters < 50f || seconds < 5) return "--:--"
+            val km = meters / 1000f
+            val secPerKm = (seconds / km).toInt()
+            val paceMin = secPerKm / 60
+            val paceSec = secPerKm % 60
+            return String.format("%02d:%02d", paceMin, paceSec)
+        }
+
+        // 1000m in 300s (5 min) -> 05:00
+        assertEquals("05:00", calculatePace(1000f, 300))
+        // 3000m in 990s (16.5 min) -> 05:30
+        assertEquals("05:30", calculatePace(3000f, 990))
+    }
+
+    @Test
+    fun `test difficulty scaling on onboarding quest targets`() {
+        fun scaleTargets(multiplier: Float): Map<String, Float> {
+            val base = mapOf(
+                "PUSH_UPS" to 100f,
+                "SIT_UPS" to 100f,
+                "SQUATS" to 100f,
+                "RUNNING" to 3000f
+            )
+            return base.mapValues { (_, qty) -> qty * multiplier }
+        }
+
+        val recruit = scaleTargets(0.5f)
+        assertEquals(50f, recruit["PUSH_UPS"]!!, 0.01f)
+        assertEquals(1500f, recruit["RUNNING"]!!, 0.01f)
+
+        val operative = scaleTargets(1.0f)
+        assertEquals(100f, operative["PUSH_UPS"]!!, 0.01f)
+        assertEquals(3000f, operative["RUNNING"]!!, 0.01f)
+
+        val monarch = scaleTargets(1.5f)
+        assertEquals(150f, monarch["PUSH_UPS"]!!, 0.01f)
+        assertEquals(4500f, monarch["RUNNING"]!!, 0.01f)
+    }
 }
