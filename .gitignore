@@ -4,12 +4,12 @@
 .claude-plugin/
 .gemini/
 
-**/build/
 .kotlin/
 .idea/
 .vscode/
 .fleet/
 *.iml
+**/build/
 /local.properties
 
 /captures/
