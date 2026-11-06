@@ -43,8 +43,8 @@ import com.kunvarpreet.ascend.ui.theme.VoidBlack
 
 @Composable
 fun StatusScreen(
-    viewModel: StatusViewModel = viewModel(),
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    viewModel: StatusViewModel = viewModel()
 ) {
     val hunter by viewModel.hunterProfile.collectAsState()
     val stats by viewModel.statsState.collectAsState()

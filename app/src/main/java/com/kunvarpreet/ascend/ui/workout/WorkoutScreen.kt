@@ -57,6 +57,7 @@ import com.kunvarpreet.ascend.ui.theme.TextPrimary
 import com.kunvarpreet.ascend.ui.theme.VoidBlack
 import kotlinx.coroutines.delay
 import java.util.Locale
+import androidx.compose.ui.platform.LocalLocale
 
 @Composable
 fun WorkoutScreen(
@@ -214,7 +215,7 @@ fun WorkoutScreen(
 
         // Rest Interval Timer Card
         val formattedRestTime = String.format(
-            Locale.getDefault(),
+            LocalLocale.current.platformLocale,
             "%02d:%02d",
             restSecondsRemaining / 60,
             restSecondsRemaining % 60

@@ -60,6 +60,7 @@ import com.kunvarpreet.ascend.ui.theme.TextMuted
 import com.kunvarpreet.ascend.ui.theme.TextPrimary
 import com.kunvarpreet.ascend.ui.theme.VoidBlack
 import java.util.Locale
+import androidx.compose.ui.platform.LocalLocale
 
 @Composable
 fun RunningScreen(
@@ -145,7 +146,7 @@ fun RunningScreen(
 
     val elapsedMin = uiState.elapsedSeconds / 60
     val elapsedSec = uiState.elapsedSeconds % 60
-    val timeFormatted = String.format(Locale.getDefault(), "%02d:%02d", elapsedMin, elapsedSec)
+    val timeFormatted = String.format(LocalLocale.current.platformLocale, "%02d:%02d", elapsedMin, elapsedSec)
 
     Column(
         modifier = modifier
@@ -178,7 +179,7 @@ fun RunningScreen(
                     letterSpacing = 0.5.sp
                 )
                 Text(
-                    text = "TARGET: ${String.format(Locale.getDefault(), "%.2f KM", targetMeters / 1000f)}",
+                    text = "TARGET: ${String.format(LocalLocale.current.platformLocale, "%.2f KM", targetMeters / 1000f)}",
                     color = ElectricCyan,
                     fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace
@@ -262,14 +263,14 @@ fun RunningScreen(
 
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    text = String.format(Locale.getDefault(), "%.2f", totalMeters / 1000f),
+                    text = String.format(LocalLocale.current.platformLocale, "%.2f", totalMeters / 1000f),
                     color = if (totalMeters >= targetMeters) EmeraldSuccess else TextPrimary,
                     fontSize = 42.sp,
                     fontWeight = FontWeight.ExtraBold,
                     fontFamily = FontFamily.Monospace
                 )
                 Text(
-                    text = "KM OF ${String.format(Locale.getDefault(), "%.2f KM", targetMeters / 1000f)}",
+                    text = "KM OF ${String.format(LocalLocale.current.platformLocale, "%.2f KM", targetMeters / 1000f)}",
                     color = TextMuted,
                     fontSize = 11.sp,
                     letterSpacing = 0.5.sp,

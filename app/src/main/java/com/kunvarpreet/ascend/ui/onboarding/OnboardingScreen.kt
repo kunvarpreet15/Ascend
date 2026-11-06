@@ -30,9 +30,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -44,18 +44,16 @@ import com.kunvarpreet.ascend.ui.theme.EmeraldSuccess
 import com.kunvarpreet.ascend.ui.theme.MonarchGold
 import com.kunvarpreet.ascend.ui.theme.OnElectricCyan
 import com.kunvarpreet.ascend.ui.theme.OnEmeraldSuccess
-import com.kunvarpreet.ascend.ui.theme.OnMonarchGold
 import com.kunvarpreet.ascend.ui.theme.TextMuted
 import com.kunvarpreet.ascend.ui.theme.TextPrimary
 import com.kunvarpreet.ascend.ui.theme.VoidBlack
-import java.util.Locale
 import kotlin.math.roundToInt
 
 @Composable
 fun OnboardingScreen(
+    modifier: Modifier = Modifier,
     viewModel: OnboardingViewModel = viewModel(),
     onOnboardingComplete: () -> Unit,
-    modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val haptic = LocalHapticFeedback.current
@@ -208,7 +206,7 @@ private fun AssessmentStep(
                     fontFamily = FontFamily.Monospace
                 )
                 Text(
-                    text = String.format(Locale.getDefault(), "%.1f kg", uiState.weightKg),
+                    text = String.format(LocalLocale.current.platformLocale, "%.1f kg", uiState.weightKg),
                     color = ElectricCyan,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.ExtraBold,
@@ -439,7 +437,7 @@ private fun AwakeningCeremonyStep(
                 Spacer(modifier = Modifier.height(4.dp))
                 val multiplier = uiState.difficultyMultiplier
                 val pushups = (100 * multiplier).roundToInt()
-                val km = String.format(Locale.getDefault(), "%.1f", 3.0f * multiplier)
+                val km = String.format(LocalLocale.current.platformLocale, "%.1f", 3.0f * multiplier)
                 Text(
                     text = "Complete $pushups Push-ups, $pushups Sit-ups, $pushups Squats, and a ${km}km Run before midnight to prevent system penalty activation.",
                     color = TextPrimary,
