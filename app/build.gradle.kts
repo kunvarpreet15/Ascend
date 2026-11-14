@@ -28,17 +28,24 @@ android {
             }
         }
     }
+    buildFeatures {
+        compose = true
+    }
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
-    lint {
-        abortOnError = true
-        baseline = file("lint-baseline.xml")
-    }
-    buildFeatures {
-        compose = true
-    }
+}
+
+tasks.withType<Test>().configureEach {
+    javaLauncher.set(
+        project.extensions.getByType<JavaToolchainService>().launcherFor {
+            languageVersion.set(JavaLanguageVersion.of(21))
+        }
+    )
 }
 
 dependencies {
@@ -53,6 +60,8 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     testImplementation(libs.junit)
     testImplementation(libs.kotlin.test)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core.ktx)
     debugRuntimeOnly(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
