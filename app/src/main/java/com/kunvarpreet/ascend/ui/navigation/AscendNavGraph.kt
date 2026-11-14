@@ -99,6 +99,9 @@ fun AscendApp(
                         } else {
                             navController.navigate(Screen.Workout.createRoute(target.id))
                         }
+                    },
+                    onNavigateToStatus = {
+                        navController.navigate(Screen.Status.route)
                     }
                 )
             }
@@ -121,7 +124,10 @@ fun AscendApp(
                 WorkoutScreen(
                     targetId = targetId,
                     viewModel = workoutViewModel,
-                    onBack = { navController.popBackStack() }
+                    onBack = { navController.popBackStack() },
+                    onNavigateToStatus = {
+                        navController.navigate(Screen.Status.route)
+                    }
                 )
             }
 
@@ -131,7 +137,10 @@ fun AscendApp(
                 RunningScreen(
                     targetId = targetId,
                     viewModel = runningViewModel,
-                    onBack = { navController.popBackStack() }
+                    onBack = { navController.popBackStack() },
+                    onNavigateToStatus = {
+                        navController.navigate(Screen.Status.route)
+                    }
                 )
             }
         }

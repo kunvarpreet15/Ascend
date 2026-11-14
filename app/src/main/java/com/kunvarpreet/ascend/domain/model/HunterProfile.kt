@@ -26,7 +26,8 @@ data class HunterProfile(
     val goldBalance: Long = 100,
     val heightCm: Float = 175.0f,
     val weightKg: Float = 70.0f,
-    val isOnboarded: Boolean = true
+    val isOnboarded: Boolean = true,
+    val difficultyMultiplier: Float = 1.0f
 ) {
     val xpProgress: Float
         get() = if (xpToNextLevel > 0) (currentXp.toFloat() / xpToNextLevel.toFloat()).coerceIn(0f, 1f) else 0f

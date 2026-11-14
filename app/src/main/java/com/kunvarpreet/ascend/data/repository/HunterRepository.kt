@@ -4,6 +4,7 @@ import android.content.Context
 import com.kunvarpreet.ascend.data.local.AscendDatabaseHelper
 import com.kunvarpreet.ascend.domain.model.AttributeStats
 import com.kunvarpreet.ascend.domain.model.HunterProfile
+import com.kunvarpreet.ascend.domain.model.QuestRewardEvent
 import kotlinx.coroutines.flow.StateFlow
 
 class HunterRepository(context: Context) {
@@ -11,6 +12,11 @@ class HunterRepository(context: Context) {
 
     val hunterProfile: StateFlow<HunterProfile?> = dbHelper.hunterState
     val statsState: StateFlow<AttributeStats?> = dbHelper.statsState
+    val rewardEvent: StateFlow<QuestRewardEvent?> = dbHelper.rewardEvent
+
+    fun dismissRewardEvent() {
+        dbHelper.dismissRewardEvent()
+    }
 
     fun allocateStatPoint(statKey: String): Boolean {
         return dbHelper.allocateStatPoint(statKey)

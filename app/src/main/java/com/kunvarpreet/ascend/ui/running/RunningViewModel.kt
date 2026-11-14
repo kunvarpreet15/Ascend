@@ -3,31 +3,32 @@ package com.kunvarpreet.ascend.ui.running
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.kunvarpreet.ascend.core.location.RunState
+import com.kunvarpreet.ascend.core.location.RunTrackingService
 import com.kunvarpreet.ascend.data.repository.QuestRepository
 import com.kunvarpreet.ascend.domain.model.ExerciseTarget
+import com.kunvarpreet.ascend.domain.model.QuestRewardEvent
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.Locale
-import kotlin.math.atan2
-import kotlin.math.cos
-import kotlin.math.pow
-import kotlin.math.sin
-import kotlin.math.sqrt
 
 data class RunningUiState(
     val target: ExerciseTarget? = null,
     val isGpsMode: Boolean = false, // false = Indoor Treadmill, true = Outdoor GPS
     val isRunning: Boolean = false,
+    val isPaused: Boolean = false,
     val elapsedSeconds: Int = 0,
     val sessionMeters: Float = 0f,
     val caloriesBurned: Int = 0,
-    val paceFormatted: String = "--:--",
+    val paceFormatted: String = "--'--\" /km",
     val hasLocationPermission: Boolean = false,
+    val hasNotificationPermission: Boolean = false,
     val isLoading: Boolean = false,
     val gpsPointsCount: Int = 0
 )
@@ -38,8 +39,61 @@ class RunningViewModel(application: Application) : AndroidViewModel(application)
     private val _uiState = MutableStateFlow(RunningUiState(isLoading = true))
     val uiState: StateFlow<RunningUiState> = _uiState.asStateFlow()
 
-    private var timerJob: Job? = null
-    private val pathPoints = mutableListOf<Pair<Double, Double>>()
+    val rewardEvent: StateFlow<QuestRewardEvent?> = questRepo.rewardEvent
+
+    fun dismissRewardEvent() {
+        questRepo.dismissRewardEvent()
+    }
+
+    private var indoorTimerJob: Job? = null
+
+    init {
+        // Collect and sync live state from Foreground Service in Outdoor GPS mode
+        viewModelScope.launch {
+            RunTrackingService.sessionState.collect { gpsSession ->
+                if (_uiState.value.isGpsMode) {
+                    when (gpsSession.state) {
+                        RunState.RUNNING -> {
+                            _uiState.update { current ->
+                                current.copy(
+                                    isRunning = true,
+                                    isPaused = false,
+                                    elapsedSeconds = gpsSession.elapsedSeconds,
+                                    sessionMeters = gpsSession.distanceMeters,
+                                    caloriesBurned = gpsSession.caloriesBurned,
+                                    paceFormatted = gpsSession.paceFormatted,
+                                    gpsPointsCount = gpsSession.waypoints.size
+                                )
+                            }
+                        }
+                        RunState.PAUSED -> {
+                            _uiState.update { current ->
+                                current.copy(
+                                    isRunning = false,
+                                    isPaused = true,
+                                    elapsedSeconds = gpsSession.elapsedSeconds,
+                                    sessionMeters = gpsSession.distanceMeters,
+                                    caloriesBurned = gpsSession.caloriesBurned,
+                                    paceFormatted = gpsSession.paceFormatted,
+                                    gpsPointsCount = gpsSession.waypoints.size
+                                )
+                            }
+                        }
+                        RunState.IDLE -> {
+                            if (_uiState.value.isRunning || _uiState.value.isPaused) {
+                                _uiState.update { current ->
+                                    current.copy(
+                                        isRunning = false,
+                                        isPaused = false
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     fun loadTarget(targetId: String) {
         viewModelScope.launch {
@@ -51,6 +105,7 @@ class RunningViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setMode(isGpsMode: Boolean) {
+        if (_uiState.value.isRunning) return // Prevent mode change during active run
         _uiState.update { it.copy(isGpsMode = isGpsMode) }
     }
 
@@ -58,11 +113,46 @@ class RunningViewModel(application: Application) : AndroidViewModel(application)
         _uiState.update { it.copy(hasLocationPermission = granted) }
     }
 
+    fun setNotificationPermissionGranted(granted: Boolean) {
+        _uiState.update { it.copy(hasNotificationPermission = granted) }
+    }
+
     fun startRun() {
-        if (_uiState.value.isRunning) return
-        _uiState.update { it.copy(isRunning = true) }
-        timerJob = viewModelScope.launch {
-            while (_uiState.value.isRunning) {
+        val current = _uiState.value
+        if (current.isGpsMode) {
+            val target = current.target
+            val targetDistance = target?.targetQuantity ?: 3000f
+            val targetId = target?.id ?: ""
+            if (current.isPaused) {
+                RunTrackingService.resumeService(getApplication())
+            } else {
+                RunTrackingService.startService(getApplication(), targetId, targetDistance)
+            }
+            _uiState.update { it.copy(isRunning = true, isPaused = false) }
+        } else {
+            // Indoor Treadmill mode
+            if (current.isRunning) return
+            _uiState.update { it.copy(isRunning = true, isPaused = false) }
+            startIndoorTimer()
+        }
+    }
+
+    fun pauseRun() {
+        val current = _uiState.value
+        if (current.isGpsMode) {
+            RunTrackingService.pauseService(getApplication())
+            _uiState.update { it.copy(isRunning = false, isPaused = true) }
+        } else {
+            _uiState.update { it.copy(isRunning = false, isPaused = true) }
+            indoorTimerJob?.cancel()
+            indoorTimerJob = null
+        }
+    }
+
+    private fun startIndoorTimer() {
+        indoorTimerJob?.cancel()
+        indoorTimerJob = viewModelScope.launch {
+            while (isActive && _uiState.value.isRunning) {
                 delay(1000L)
                 val newElapsed = _uiState.value.elapsedSeconds + 1
                 val meters = _uiState.value.sessionMeters
@@ -79,13 +169,8 @@ class RunningViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun pauseRun() {
-        _uiState.update { it.copy(isRunning = false) }
-        timerJob?.cancel()
-        timerJob = null
-    }
-
     fun addIndoorDistance(meters: Float) {
+        if (_uiState.value.isGpsMode) return
         val newMeters = _uiState.value.sessionMeters + meters
         val elapsed = _uiState.value.elapsedSeconds
         val paceStr = calculatePaceString(newMeters, elapsed)
@@ -99,83 +184,66 @@ class RunningViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun onLocationUpdate(lat: Double, lng: Double) {
-        if (!_uiState.value.isRunning || !_uiState.value.isGpsMode) return
-
-        if (pathPoints.isNotEmpty()) {
-            val last = pathPoints.last()
-            val dist = haversineDistanceMeters(last.first, last.second, lat, lng).toFloat()
-            // Filter realistic movements (e.g., delta > 1.5m and delta < 60m per second)
-            if (dist in 1.5f..60f) {
-                pathPoints.add(Pair(lat, lng))
-                val newMeters = _uiState.value.sessionMeters + dist
-                val elapsed = _uiState.value.elapsedSeconds
-                val paceStr = calculatePaceString(newMeters, elapsed)
-                val calories = (newMeters * 0.065f).toInt()
-                _uiState.update {
-                    it.copy(
-                        sessionMeters = newMeters,
-                        paceFormatted = paceStr,
-                        caloriesBurned = calories,
-                        gpsPointsCount = pathPoints.size
-                    )
-                }
-            }
-        } else {
-            pathPoints.add(Pair(lat, lng))
-            _uiState.update { it.copy(gpsPointsCount = 1) }
-        }
-    }
-
     fun finishRun(onFinished: () -> Unit) {
-        pauseRun()
-        val currentState = _uiState.value
-        val target = currentState.target
-        val meters = currentState.sessionMeters
-        val elapsed = currentState.elapsedSeconds
+        val current = _uiState.value
+        if (current.isGpsMode) {
+            RunTrackingService.stopAndSaveService(getApplication())
+            _uiState.update {
+                it.copy(
+                    isRunning = false,
+                    isPaused = false,
+                    sessionMeters = 0f,
+                    elapsedSeconds = 0
+                )
+            }
+            onFinished()
+        } else {
+            indoorTimerJob?.cancel()
+            indoorTimerJob = null
+            val target = current.target
+            val meters = current.sessionMeters
+            val elapsed = current.elapsedSeconds
 
-        if (target != null && meters > 0f) {
-            val avgPaceSec = if (meters > 0) elapsed / (meters / 1000f) else 0f
-            val calories = (meters * 0.065f).toInt()
-            val geoJson = buildGeoJson(pathPoints)
-
-            questRepo.logRepetitionProgress(target.id, meters)
-            questRepo.logRunGps(
-                targetId = target.id,
-                distanceMeters = meters,
-                durationSeconds = elapsed,
-                avgPaceSecPerKm = avgPaceSec,
-                caloriesBurned = calories,
-                gpsPathGeoJson = geoJson
-            )
+            if (target != null && meters > 0f) {
+                val avgPaceSec = if (meters > 0) elapsed / (meters / 1000f) else 0f
+                val calories = (meters * 0.065f).toInt()
+                questRepo.logRepetitionProgress(target.id, meters)
+                questRepo.logRunGps(
+                    targetId = target.id,
+                    distanceMeters = meters,
+                    durationSeconds = elapsed,
+                    avgPaceSecPerKm = avgPaceSec,
+                    caloriesBurned = calories,
+                    gpsPathGeoJson = "[]"
+                )
+            }
+            _uiState.update {
+                it.copy(
+                    isRunning = false,
+                    isPaused = false,
+                    sessionMeters = 0f,
+                    elapsedSeconds = 0
+                )
+            }
+            onFinished()
         }
-        onFinished()
     }
 
     private fun calculatePaceString(meters: Float, seconds: Int): String {
-        if (meters < 50f || seconds < 5) return "--:--"
+        if (meters < 50f || seconds < 5) return "--'--\" /km"
         val km = meters / 1000f
         val secPerKm = (seconds / km).toInt()
         val paceMin = secPerKm / 60
         val paceSec = secPerKm % 60
-        return if (paceMin in 2..29) String.format(Locale.getDefault(), "%02d:%02d", paceMin, paceSec) else "--:--"
-    }
-
-    private fun haversineDistanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
-        val r = 6371000.0 // Earth radius in meters
-        val dLat = Math.toRadians(lat2 - lat1)
-        val dLon = Math.toRadians(lon2 - lon1)
-        val a = sin(dLat / 2).pow(2.0) +
-                cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) *
-                sin(dLon / 2).pow(2.0)
-        val c = 2 * atan2(sqrt(a), sqrt(1 - a))
-        return r * c
-    }
-
-    private fun buildGeoJson(points: List<Pair<Double, Double>>): String {
-        if (points.isEmpty()) return "[]"
-        return points.joinToString(separator = ",", prefix = "[", postfix = "]") { (lat, lng) ->
-            "{\"lat\":$lat,\"lng\":$lng}"
+        return if (paceMin in 2..29) {
+            String.format(Locale.US, "%d'%02d\" /km", paceMin, paceSec)
+        } else {
+            "--'--\" /km"
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        indoorTimerJob?.cancel()
     }
 }

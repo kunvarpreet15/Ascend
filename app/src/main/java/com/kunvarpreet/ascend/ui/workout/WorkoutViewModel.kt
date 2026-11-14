@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.kunvarpreet.ascend.data.repository.QuestRepository
 import com.kunvarpreet.ascend.domain.model.ExerciseTarget
+import com.kunvarpreet.ascend.domain.model.QuestRewardEvent
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,6 +22,12 @@ class WorkoutViewModel(application: Application) : AndroidViewModel(application)
 
     private val _uiState = MutableStateFlow(WorkoutUiState(isLoading = true))
     val uiState: StateFlow<WorkoutUiState> = _uiState.asStateFlow()
+
+    val rewardEvent: StateFlow<QuestRewardEvent?> = questRepo.rewardEvent
+
+    fun dismissRewardEvent() {
+        questRepo.dismissRewardEvent()
+    }
 
     fun loadTarget(targetId: String) {
         viewModelScope.launch {

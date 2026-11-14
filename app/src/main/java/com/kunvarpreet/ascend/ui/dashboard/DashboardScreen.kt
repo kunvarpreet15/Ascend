@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.sp
 import com.kunvarpreet.ascend.domain.model.ExerciseTarget
 import com.kunvarpreet.ascend.domain.model.ExerciseType
 import com.kunvarpreet.ascend.ui.components.HunterHUDHeader
+import com.kunvarpreet.ascend.ui.components.LevelUpRewardModal
 import com.kunvarpreet.ascend.ui.components.QuestDeckCard
 import com.kunvarpreet.ascend.ui.theme.BorderSubtle
 import com.kunvarpreet.ascend.ui.theme.CardSurface
@@ -50,9 +51,24 @@ import com.kunvarpreet.ascend.ui.theme.VoidBlack
 fun DashboardScreen(
     viewModel: DashboardViewModel,
     onTargetClick: (ExerciseTarget) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onNavigateToStatus: (() -> Unit)? = null
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val rewardEvent by viewModel.rewardEvent.collectAsState()
+
+    if (rewardEvent != null) {
+        LevelUpRewardModal(
+            event = rewardEvent!!,
+            onAllocateStats = {
+                viewModel.dismissRewardEvent()
+                onNavigateToStatus?.invoke()
+            },
+            onDismiss = {
+                viewModel.dismissRewardEvent()
+            }
+        )
+    }
 
     if (uiState.isLoading || uiState.hunter == null) {
         Box(

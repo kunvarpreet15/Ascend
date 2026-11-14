@@ -45,6 +45,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kunvarpreet.ascend.ui.components.LevelUpRewardModal
 import com.kunvarpreet.ascend.ui.theme.BorderSubtle
 import com.kunvarpreet.ascend.ui.theme.CardSurface
 import com.kunvarpreet.ascend.ui.theme.DarkSurface
@@ -64,9 +65,24 @@ fun WorkoutScreen(
     targetId: String,
     viewModel: WorkoutViewModel,
     onBack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onNavigateToStatus: (() -> Unit)? = null
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val rewardEvent by viewModel.rewardEvent.collectAsState()
+
+    if (rewardEvent != null) {
+        LevelUpRewardModal(
+            event = rewardEvent!!,
+            onAllocateStats = {
+                viewModel.dismissRewardEvent()
+                onNavigateToStatus?.invoke()
+            },
+            onDismiss = {
+                viewModel.dismissRewardEvent()
+            }
+        )
+    }
     val haptic = LocalHapticFeedback.current
 
     var restSecondsRemaining by remember { mutableIntStateOf(0) }

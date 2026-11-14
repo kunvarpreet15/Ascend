@@ -1,10 +1,8 @@
 package com.kunvarpreet.ascend.ui.running
 
 import android.Manifest
-import android.content.Context
-import android.location.LocationListener
-import android.location.LocationManager
-import android.os.Looper
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
@@ -29,12 +27,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -44,10 +42,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import com.kunvarpreet.ascend.ui.components.LevelUpRewardModal
 import com.kunvarpreet.ascend.ui.theme.BorderSubtle
 import com.kunvarpreet.ascend.ui.theme.CardSurface
 import com.kunvarpreet.ascend.ui.theme.DarkSurface
@@ -59,66 +60,72 @@ import com.kunvarpreet.ascend.ui.theme.OnEmeraldSuccess
 import com.kunvarpreet.ascend.ui.theme.TextMuted
 import com.kunvarpreet.ascend.ui.theme.TextPrimary
 import com.kunvarpreet.ascend.ui.theme.VoidBlack
-import java.util.Locale
-import androidx.compose.ui.platform.LocalLocale
 
 @Composable
 fun RunningScreen(
     targetId: String,
     viewModel: RunningViewModel,
     onBack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onNavigateToStatus: (() -> Unit)? = null
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val rewardEvent by viewModel.rewardEvent.collectAsState()
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
+
+    if (rewardEvent != null) {
+        LevelUpRewardModal(
+            event = rewardEvent!!,
+            onAllocateStats = {
+                viewModel.dismissRewardEvent()
+                onNavigateToStatus?.invoke()
+            },
+            onDismiss = {
+                viewModel.dismissRewardEvent()
+            }
+        )
+    }
 
     LaunchedEffect(targetId) {
         viewModel.loadTarget(targetId)
     }
 
-    // Permission launcher for Location
+    // Permission launcher for Location and Notifications (API 33+)
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val fineGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
         val coarseGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        val notifGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions[Manifest.permission.POST_NOTIFICATIONS] == true
+        } else {
+            true
+        }
         viewModel.setLocationPermissionGranted(fineGranted || coarseGranted)
+        viewModel.setNotificationPermissionGranted(notifGranted)
     }
 
-    // Lifecycle-aware GPS updates
-    DisposableEffect(uiState.isGpsMode, uiState.isRunning, uiState.hasLocationPermission) {
-        var locationManager: LocationManager? = null
-        var locationListener: LocationListener? = null
-
-        if (uiState.isGpsMode && uiState.isRunning && uiState.hasLocationPermission) {
-            try {
-                locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
-                locationListener = LocationListener { location ->
-                    viewModel.onLocationUpdate(location.latitude, location.longitude)
-                }
-                val provider = when {
-                    locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER) == true -> LocationManager.GPS_PROVIDER
-                    locationManager?.isProviderEnabled(LocationManager.NETWORK_PROVIDER) == true -> LocationManager.NETWORK_PROVIDER
-                    else -> null
-                }
-                if (provider != null) {
-                    locationManager?.requestLocationUpdates(
-                        provider,
-                        1000L,
-                        2f,
-                        locationListener,
-                        Looper.getMainLooper()
-                    )
-                }
-            } catch (e: SecurityException) {
-                // Permission not granted or revoked
-            }
+    // Check initial permission status
+    LaunchedEffect(Unit) {
+        val hasFine = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val hasCoarse = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val hasNotif = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
         }
-
-        onDispose {
-            locationListener?.let { locationManager?.removeUpdates(it) }
-        }
+        viewModel.setLocationPermissionGranted(hasFine || hasCoarse)
+        viewModel.setNotificationPermissionGranted(hasNotif)
     }
 
     if (uiState.isLoading || uiState.target == null) {
@@ -243,7 +250,7 @@ fun RunningScreen(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // Distance Gauge Box
+        // Distance Circular Gauge
         Box(
             modifier = Modifier.size(220.dp),
             contentAlignment = Alignment.Center
@@ -303,19 +310,16 @@ fun RunningScreen(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Time
             TelemetryCard(
                 modifier = Modifier.weight(1f),
                 label = "ELAPSED",
                 value = timeFormatted
             )
-            // Pace
             TelemetryCard(
                 modifier = Modifier.weight(1f),
                 label = "PACE",
-                value = if (uiState.paceFormatted != "--:--") "${uiState.paceFormatted}/km" else "--:--"
+                value = uiState.paceFormatted
             )
-            // Calories
             TelemetryCard(
                 modifier = Modifier.weight(1f),
                 label = "CALORIES",
@@ -325,7 +329,7 @@ fun RunningScreen(
 
         Spacer(modifier = Modifier.height(18.dp))
 
-        // Mode Interaction Block
+        // Mode Interaction Section
         if (!uiState.isGpsMode) {
             // Indoor Treadmill Quick Increments
             Column(
@@ -396,35 +400,39 @@ fun RunningScreen(
                 )
                 Spacer(modifier = Modifier.height(6.dp))
 
-                if (!uiState.hasLocationPermission) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                val needsPermissions = !uiState.hasLocationPermission ||
+                        (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !uiState.hasNotificationPermission)
+
+                if (needsPermissions) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
                         Text(
-                            text = "GPS permission required for tracking",
+                            text = "Location & Notification permissions required for foreground satellite tracking.",
                             color = MonarchGold,
                             fontSize = 11.sp
                         )
+                        Spacer(modifier = Modifier.height(8.dp))
                         Box(
                             modifier = Modifier
+                                .fillMaxWidth()
+                                .height(40.dp)
                                 .clip(RoundedCornerShape(6.dp))
                                 .background(MonarchGold)
                                 .clickable {
-                                    permissionLauncher.launch(
-                                        arrayOf(
-                                            Manifest.permission.ACCESS_FINE_LOCATION,
-                                            Manifest.permission.ACCESS_COARSE_LOCATION
-                                        )
+                                    val reqs = mutableListOf(
+                                        Manifest.permission.ACCESS_FINE_LOCATION,
+                                        Manifest.permission.ACCESS_COARSE_LOCATION
                                     )
-                                }
-                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                        reqs.add(Manifest.permission.POST_NOTIFICATIONS)
+                                    }
+                                    permissionLauncher.launch(reqs.toTypedArray())
+                                },
+                            contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = "ENABLE",
+                                text = "GRANT PERMISSIONS",
                                 color = VoidBlack,
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Monospace
                             )
@@ -437,21 +445,43 @@ fun RunningScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = if (uiState.isRunning) "TRACKING: ${uiState.gpsPointsCount} WAYPOINTS" else "GPS SATELLITES: READY",
-                            color = if (uiState.isRunning) ElectricCyan else TextPrimary,
+                            text = when {
+                                uiState.isRunning -> "TRACKING: ${uiState.gpsPointsCount} WAYPOINTS"
+                                uiState.isPaused -> "SESSION PAUSED"
+                                else -> "GPS SATELLITES: READY"
+                            },
+                            color = when {
+                                uiState.isRunning -> ElectricCyan
+                                uiState.isPaused -> MonarchGold
+                                else -> TextPrimary
+                            },
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace
                         )
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(4.dp))
-                                .background(if (uiState.isRunning) EmeraldSuccess else CardSurface)
+                                .background(
+                                    when {
+                                        uiState.isRunning -> EmeraldSuccess
+                                        uiState.isPaused -> DarkSurface
+                                        else -> CardSurface
+                                    }
+                                )
                                 .border(1.dp, BorderSubtle, RoundedCornerShape(4.dp))
                                 .padding(horizontal = 8.dp, vertical = 2.dp)
                         ) {
                             Text(
-                                text = if (uiState.isRunning) "LIVE FIX" else "STANDBY",
-                                color = if (uiState.isRunning) OnEmeraldSuccess else TextMuted,
+                                text = when {
+                                    uiState.isRunning -> "LIVE FIX"
+                                    uiState.isPaused -> "PAUSED"
+                                    else -> "STANDBY"
+                                },
+                                color = when {
+                                    uiState.isRunning -> OnEmeraldSuccess
+                                    uiState.isPaused -> MonarchGold
+                                    else -> TextMuted
+                                },
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Monospace
@@ -465,7 +495,7 @@ fun RunningScreen(
         Spacer(modifier = Modifier.height(24.dp))
 
         // Run Controls
-        if (!uiState.isRunning) {
+        if (!uiState.isRunning && !uiState.isPaused) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -478,16 +508,25 @@ fun RunningScreen(
                     },
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = "START RUN",
-                    color = OnElectricCyan,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    fontFamily = FontFamily.Monospace,
-                    letterSpacing = 1.sp
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = "Start",
+                        tint = OnElectricCyan,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "START RUN",
+                        color = OnElectricCyan,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 1.sp
+                    )
+                }
             }
-        } else {
+        } else if (uiState.isRunning) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -544,9 +583,75 @@ fun RunningScreen(
                     }
                 }
             }
+        } else {
+            // Paused state
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(52.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(ElectricCyan)
+                        .clickable {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            viewModel.startRun()
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = "Resume",
+                            tint = OnElectricCyan,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "RESUME",
+                            color = OnElectricCyan,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(52.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(EmeraldSuccess)
+                        .clickable {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            viewModel.finishRun(onBack)
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = "Save",
+                            tint = OnEmeraldSuccess,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "FINISH & SAVE",
+                            color = OnEmeraldSuccess,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+            }
         }
 
-        if (uiState.sessionMeters > 0f && !uiState.isRunning) {
+        if (uiState.sessionMeters > 0f && !uiState.isRunning && !uiState.isPaused) {
             Spacer(modifier = Modifier.height(10.dp))
             Box(
                 modifier = Modifier

@@ -7,6 +7,7 @@ import com.kunvarpreet.ascend.data.repository.HunterRepository
 import com.kunvarpreet.ascend.data.repository.QuestRepository
 import com.kunvarpreet.ascend.domain.model.DailyQuest
 import com.kunvarpreet.ascend.domain.model.HunterProfile
+import com.kunvarpreet.ascend.domain.model.QuestRewardEvent
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -29,6 +30,12 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val _timeRemaining = MutableStateFlow(calculateTimeUntilMidnight())
     val timeRemaining: StateFlow<String> = _timeRemaining
+
+    val rewardEvent: StateFlow<QuestRewardEvent?> = questRepo.rewardEvent
+
+    fun dismissRewardEvent() {
+        questRepo.dismissRewardEvent()
+    }
 
     val uiState: StateFlow<DashboardUiState> = combine(
         hunterRepo.hunterProfile,
