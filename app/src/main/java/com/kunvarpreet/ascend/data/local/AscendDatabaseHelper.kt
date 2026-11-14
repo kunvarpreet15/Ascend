@@ -21,6 +21,7 @@ import com.kunvarpreet.ascend.domain.model.HunterProfile
 import com.kunvarpreet.ascend.domain.model.QuestRewardEvent
 import com.kunvarpreet.ascend.domain.model.QuestStatus
 import com.kunvarpreet.ascend.domain.model.RankTier
+import com.kunvarpreet.ascend.domain.model.RunCheckpoint
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -1058,5 +1059,88 @@ class AscendDatabaseHelper(
             addProgressToTarget(targetId, distanceMeters)
         }
         return true
+    }
+
+    fun getActiveInProgressRun(targetId: String): RunCheckpoint? {
+        val db = readableDatabase
+        val query = """
+            SELECT g.workout_session_id, g.target_id, g.distance_meters, 
+                   w.duration_seconds, g.avg_pace_sec_per_km, g.calories_burned, 
+                   g.gps_path_geojson, g.created_at
+            FROM run_gps_logs g
+            LEFT JOIN workout_session_logs w ON g.workout_session_id = w.id
+            WHERE g.target_id = ? AND g.status = 'IN_PROGRESS'
+            ORDER BY g.created_at DESC
+            LIMIT 1
+        """.trimIndent()
+
+        val cursor = db.rawQuery(query, arrayOf(targetId))
+        var checkpoint: RunCheckpoint? = null
+        if (cursor.moveToFirst()) {
+            val sessionId = cursor.getString(0) ?: ""
+            val tid = cursor.getString(1) ?: targetId
+            val distance = cursor.getFloat(2)
+            val duration = if (!cursor.isNull(3)) cursor.getInt(3) else 0
+            val pace = cursor.getFloat(4)
+            val calories = cursor.getInt(5)
+            val geoJson = cursor.getString(6) ?: "[]"
+            val createdAt = cursor.getString(7) ?: ""
+            checkpoint = RunCheckpoint(
+                sessionId = sessionId,
+                targetId = tid,
+                distanceMeters = distance,
+                durationSeconds = duration,
+                avgPaceSecPerKm = pace,
+                caloriesBurned = calories,
+                gpsPathGeoJson = geoJson,
+                createdAt = createdAt
+            )
+        }
+        cursor.close()
+        return checkpoint
+    }
+
+    fun finalizeOrDiscardRunCheckpoint(
+        sessionId: String,
+        finalizeAndSave: Boolean,
+        targetId: String = ""
+    ): Boolean {
+        val db = writableDatabase
+        db.beginTransaction()
+        return try {
+            if (finalizeAndSave) {
+                val cursor = db.rawQuery(
+                    "SELECT distance_meters, target_id FROM run_gps_logs WHERE workout_session_id = ?",
+                    arrayOf(sessionId)
+                )
+                var distance = 0f
+                var actualTargetId = targetId
+                if (cursor.moveToFirst()) {
+                    distance = cursor.getFloat(0)
+                    if (actualTargetId.isBlank()) {
+                        actualTargetId = cursor.getString(1) ?: ""
+                    }
+                }
+                cursor.close()
+
+                val values = ContentValues().apply {
+                    put("status", "COMPLETED")
+                }
+                db.update("run_gps_logs", values, "workout_session_id = ?", arrayOf(sessionId))
+
+                if (distance > 0f && actualTargetId.isNotBlank()) {
+                    addProgressToTarget(actualTargetId, distance)
+                }
+            } else {
+                db.delete("run_gps_logs", "workout_session_id = ?", arrayOf(sessionId))
+                db.delete("workout_session_logs", "id = ?", arrayOf(sessionId))
+            }
+            db.setTransactionSuccessful()
+            true
+        } catch (_: Exception) {
+            false
+        } finally {
+            db.endTransaction()
+        }
     }
 }

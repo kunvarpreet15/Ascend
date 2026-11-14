@@ -1,7 +1,5 @@
 package com.kunvarpreet.ascend.ui.workout
 
-import android.media.AudioManager
-import android.media.ToneGenerator
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -85,30 +83,8 @@ fun WorkoutScreen(
     }
     val haptic = LocalHapticFeedback.current
 
-    var restSecondsRemaining by remember { mutableIntStateOf(0) }
-    var isTimerRunning by remember { mutableStateOf(false) }
-    var selectedChipSeconds by remember { mutableIntStateOf(60) }
-
     LaunchedEffect(targetId) {
         viewModel.loadTarget(targetId)
-    }
-
-    LaunchedEffect(isTimerRunning, restSecondsRemaining) {
-        if (isTimerRunning && restSecondsRemaining > 0) {
-            delay(1000L)
-            val next = restSecondsRemaining - 1
-            restSecondsRemaining = next
-            if (next == 0) {
-                isTimerRunning = false
-                try {
-                    val toneGen = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80)
-                    toneGen.startTone(ToneGenerator.TONE_PROP_BEEP, 350)
-                } catch (e: Throwable) {
-                    // Audio stream fallback
-                }
-                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-            }
-        }
     }
 
     if (uiState.isLoading || uiState.target == null) {
@@ -229,14 +205,7 @@ fun WorkoutScreen(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // Rest Interval Timer Card
-        val formattedRestTime = String.format(
-            LocalLocale.current.platformLocale,
-            "%02d:%02d",
-            restSecondsRemaining / 60,
-            restSecondsRemaining % 60
-        )
-
+        // Rest Interval Timer Card (Wall-clock backed by WorkoutViewModel)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -244,7 +213,7 @@ fun WorkoutScreen(
                 .background(CardSurface)
                 .border(
                     width = 1.dp,
-                    color = if (isTimerRunning) ElectricCyan else BorderSubtle,
+                    color = if (uiState.isTimerRunning) ElectricCyan else BorderSubtle,
                     shape = RoundedCornerShape(12.dp)
                 )
                 .padding(14.dp)
@@ -267,8 +236,8 @@ fun WorkoutScreen(
                         letterSpacing = 0.5.sp
                     )
                     Text(
-                        text = formattedRestTime,
-                        color = if (isTimerRunning) ElectricCyan else TextPrimary,
+                        text = uiState.formattedRestTime,
+                        color = if (uiState.isTimerRunning) ElectricCyan else TextPrimary,
                         fontSize = 18.sp,
                         fontWeight = FontWeight.ExtraBold,
                         fontFamily = FontFamily.Monospace
@@ -283,7 +252,7 @@ fun WorkoutScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     listOf(30, 60, 90).forEach { seconds ->
-                        val isSelected = isTimerRunning && selectedChipSeconds == seconds
+                        val isSelected = uiState.isTimerRunning && uiState.selectedRestDurationSec == seconds
                         Box(
                             modifier = Modifier
                                 .weight(1f)
@@ -297,9 +266,7 @@ fun WorkoutScreen(
                                 )
                                 .clickable {
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    selectedChipSeconds = seconds
-                                    restSecondsRemaining = seconds
-                                    isTimerRunning = true
+                                    viewModel.startRestTimer(seconds)
                                 },
                             contentAlignment = Alignment.Center
                         ) {
@@ -313,7 +280,7 @@ fun WorkoutScreen(
                         }
                     }
 
-                    if (isTimerRunning) {
+                    if (uiState.isTimerRunning) {
                         Box(
                             modifier = Modifier
                                 .height(38.dp)
@@ -322,8 +289,7 @@ fun WorkoutScreen(
                                 .border(1.dp, BorderSubtle, RoundedCornerShape(8.dp))
                                 .clickable {
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    isTimerRunning = false
-                                    restSecondsRemaining = 0
+                                    viewModel.stopRestTimer()
                                 }
                                 .padding(horizontal = 10.dp),
                             contentAlignment = Alignment.Center

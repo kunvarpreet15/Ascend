@@ -80,19 +80,26 @@ class RunTrackingService : Service() {
         val current = _sessionState.value
         if (current.state == RunState.RUNNING) return
 
-        val newSessionId = UUID.randomUUID().toString()
-        lastCheckpointMeters = 0f
+        val resumeExisting = current.state == RunState.PAUSED && current.sessionId.isNotBlank() && current.targetId == targetId
+        val sessionId = if (resumeExisting) current.sessionId else UUID.randomUUID().toString()
+        val elapsed = if (resumeExisting) current.elapsedSeconds else 0
+        val distance = if (resumeExisting) current.distanceMeters else 0f
+        val calories = if (resumeExisting) current.caloriesBurned else 0
+        val pace = if (resumeExisting) current.currentPaceSecPerKm else 0f
+        val waypoints = if (resumeExisting) current.waypoints else emptyList()
+
+        lastCheckpointMeters = (distance / 100f).toInt() * 100f
         secondsSinceLastNotification = 0
 
         _sessionState.value = ActiveRunSessionState(
             state = RunState.RUNNING,
             targetId = targetId,
-            sessionId = newSessionId,
-            elapsedSeconds = 0,
-            distanceMeters = 0f,
-            currentPaceSecPerKm = 0f,
-            caloriesBurned = 0,
-            waypoints = emptyList(),
+            sessionId = sessionId,
+            elapsedSeconds = elapsed,
+            distanceMeters = distance,
+            currentPaceSecPerKm = pace,
+            caloriesBurned = calories,
+            waypoints = waypoints,
             targetDistanceMeters = targetDistance
         )
 
@@ -388,6 +395,28 @@ class RunTrackingService : Service() {
 
         private val _sessionState = MutableStateFlow(ActiveRunSessionState())
         val sessionState: StateFlow<ActiveRunSessionState> = _sessionState.asStateFlow()
+
+        fun restoreSessionFromCheckpoint(
+            targetId: String,
+            sessionId: String,
+            initialDistance: Float,
+            initialElapsed: Int,
+            initialCalories: Int,
+            initialWaypoints: List<LatLng>,
+            targetDistance: Float
+        ) {
+            _sessionState.value = ActiveRunSessionState(
+                state = RunState.PAUSED,
+                targetId = targetId,
+                sessionId = sessionId,
+                elapsedSeconds = initialElapsed,
+                distanceMeters = initialDistance,
+                currentPaceSecPerKm = if (initialDistance > 50f && initialElapsed > 5) initialElapsed / (initialDistance / 1000f) else 0f,
+                caloriesBurned = initialCalories,
+                waypoints = initialWaypoints,
+                targetDistanceMeters = targetDistance
+            )
+        }
 
         fun startService(context: Context, targetId: String, targetDistanceMeters: Float = 3000f) {
             val intent = Intent(context, RunTrackingService::class.java).apply {

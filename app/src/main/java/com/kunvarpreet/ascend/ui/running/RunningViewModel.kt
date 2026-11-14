@@ -3,11 +3,14 @@ package com.kunvarpreet.ascend.ui.running
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.kunvarpreet.ascend.core.location.LatLng
 import com.kunvarpreet.ascend.core.location.RunState
 import com.kunvarpreet.ascend.core.location.RunTrackingService
 import com.kunvarpreet.ascend.data.repository.QuestRepository
 import com.kunvarpreet.ascend.domain.model.ExerciseTarget
 import com.kunvarpreet.ascend.domain.model.QuestRewardEvent
+import com.kunvarpreet.ascend.domain.model.RunCheckpoint
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,7 +33,8 @@ data class RunningUiState(
     val hasLocationPermission: Boolean = false,
     val hasNotificationPermission: Boolean = false,
     val isLoading: Boolean = false,
-    val gpsPointsCount: Int = 0
+    val gpsPointsCount: Int = 0,
+    val unrecoveredCheckpoint: RunCheckpoint? = null
 )
 
 class RunningViewModel(application: Application) : AndroidViewModel(application) {
@@ -102,6 +106,65 @@ class RunningViewModel(application: Application) : AndroidViewModel(application)
                 _uiState.update { it.copy(target = target, isLoading = false) }
             }
         }
+        // Check for in-progress checkpoints from unexpected process shutdown
+        viewModelScope.launch(Dispatchers.IO) {
+            val checkpoint = questRepo.getActiveInProgressRun(targetId)
+            if (checkpoint != null && checkpoint.distanceMeters > 0f) {
+                _uiState.update { it.copy(unrecoveredCheckpoint = checkpoint) }
+            }
+        }
+    }
+
+    fun resumeCheckpoint(checkpoint: RunCheckpoint) {
+        val waypoints = parseGeoJsonWaypoints(checkpoint.gpsPathGeoJson)
+        val targetDistance = _uiState.value.target?.targetQuantity ?: 3000f
+
+        _uiState.update {
+            it.copy(
+                unrecoveredCheckpoint = null,
+                isGpsMode = true,
+                isRunning = false,
+                isPaused = true,
+                sessionMeters = checkpoint.distanceMeters,
+                elapsedSeconds = checkpoint.durationSeconds,
+                caloriesBurned = checkpoint.caloriesBurned,
+                paceFormatted = if (checkpoint.avgPaceSecPerKm > 0f) {
+                    val totalSec = checkpoint.avgPaceSecPerKm.toInt()
+                    String.format(Locale.US, "%d'%02d\" /km", totalSec / 60, totalSec % 60)
+                } else {
+                    "--'--\" /km"
+                },
+                gpsPointsCount = waypoints.size
+            )
+        }
+
+        RunTrackingService.restoreSessionFromCheckpoint(
+            targetId = checkpoint.targetId,
+            sessionId = checkpoint.sessionId,
+            initialDistance = checkpoint.distanceMeters,
+            initialElapsed = checkpoint.durationSeconds,
+            initialCalories = checkpoint.caloriesBurned,
+            initialWaypoints = waypoints,
+            targetDistance = targetDistance
+        )
+    }
+
+    fun discardCheckpoint(checkpoint: RunCheckpoint) {
+        viewModelScope.launch(Dispatchers.IO) {
+            questRepo.finalizeOrDiscardRunCheckpoint(checkpoint.sessionId, finalizeAndSave = false)
+        }
+        _uiState.update { it.copy(unrecoveredCheckpoint = null) }
+    }
+
+    fun saveRecoveredCheckpoint(checkpoint: RunCheckpoint) {
+        viewModelScope.launch(Dispatchers.IO) {
+            questRepo.finalizeOrDiscardRunCheckpoint(
+                sessionId = checkpoint.sessionId,
+                finalizeAndSave = true,
+                targetId = checkpoint.targetId
+            )
+        }
+        _uiState.update { it.copy(unrecoveredCheckpoint = null) }
     }
 
     fun setMode(isGpsMode: Boolean) {
@@ -240,6 +303,20 @@ class RunningViewModel(application: Application) : AndroidViewModel(application)
         } else {
             "--'--\" /km"
         }
+    }
+
+    fun parseGeoJsonWaypoints(geoJson: String): List<LatLng> {
+        if (geoJson.isBlank() || geoJson == "[]") return emptyList()
+        val waypoints = mutableListOf<LatLng>()
+        val regex = """\{"lat":\s*([0-9.-]+)\s*,\s*"lng":\s*([0-9.-]+)\}""".toRegex()
+        for (match in regex.findAll(geoJson)) {
+            val lat = match.groupValues[1].toDoubleOrNull()
+            val lng = match.groupValues[2].toDoubleOrNull()
+            if (lat != null && lng != null) {
+                waypoints.add(LatLng(lat, lng))
+            }
+        }
+        return waypoints
     }
 
     override fun onCleared() {

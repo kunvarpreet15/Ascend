@@ -4,6 +4,7 @@ import android.content.Context
 import com.kunvarpreet.ascend.data.local.AscendDatabaseHelper
 import com.kunvarpreet.ascend.domain.model.DailyQuest
 import com.kunvarpreet.ascend.domain.model.QuestRewardEvent
+import com.kunvarpreet.ascend.domain.model.RunCheckpoint
 import kotlinx.coroutines.flow.StateFlow
 
 class QuestRepository(context: Context) {
@@ -53,6 +54,18 @@ class QuestRepository(context: Context) {
         gpsPathGeoJson: String = "[]"
     ): Boolean {
         return dbHelper.finalizeRunGps(sessionId, targetId, distanceMeters, durationSeconds, avgPaceSecPerKm, caloriesBurned, gpsPathGeoJson)
+    }
+
+    fun getActiveInProgressRun(targetId: String): RunCheckpoint? {
+        return dbHelper.getActiveInProgressRun(targetId)
+    }
+
+    fun finalizeOrDiscardRunCheckpoint(
+        sessionId: String,
+        finalizeAndSave: Boolean,
+        targetId: String = ""
+    ): Boolean {
+        return dbHelper.finalizeOrDiscardRunCheckpoint(sessionId, finalizeAndSave, targetId)
     }
 
     fun refresh() {
