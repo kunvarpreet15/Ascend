@@ -1,6 +1,5 @@
 [versions]
 activityCompose = "1.13.0"
-ada = "3.20.3"
 agp = "9.5.1"
 androidxTestCore = "1.7.0"
 composeBom = "2026.09.00"
@@ -37,4 +36,3 @@ robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
-autonomousapps-dependency-analysis = { id = "com.autonomousapps.dependency-analysis", version.ref = "ada"}
