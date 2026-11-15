@@ -48,7 +48,8 @@ object CatchUpEvaluator {
         todayDate: String,
         lastQuestStatus: QuestStatus,
         currentStreak: Int,
-        availableStreakShields: Int
+        availableStreakShields: Int,
+        difficultyMultiplier: Float = 1.0f
     ): CatchUpResult {
         if (lastQuestDate.isNullOrBlank()) {
             return CatchUpResult.NoOpSameDay
@@ -83,7 +84,7 @@ object CatchUpEvaluator {
                 } else {
                     CatchUpResult.PenaltyTriggered(
                         missedDaysCount = 1,
-                        penaltyTaskDescription = buildPenaltyDescription(1)
+                        penaltyTaskDescription = buildPenaltyDescription(1, difficultyMultiplier)
                     )
                 }
             }
@@ -98,14 +99,19 @@ object CatchUpEvaluator {
         } else {
             CatchUpResult.PenaltyTriggered(
                 missedDaysCount = missedDays,
-                penaltyTaskDescription = buildPenaltyDescription(missedDays)
+                penaltyTaskDescription = buildPenaltyDescription(missedDays, difficultyMultiplier)
             )
         }
     }
 
-    private fun buildPenaltyDescription(missedDaysCount: Int): String {
-        val pushups = minOf(missedDaysCount * 50, 200)
-        val runKm = minOf(missedDaysCount * 2, 10)
-        return "Survival Trial: $missedDaysCount missed quest deck(s). Clear $pushups Push-ups and ${runKm}km Survival Run before midnight to purge Penalty Zone."
+    fun getPenaltyTaskDescription(difficultyMultiplier: Float): String = when {
+        difficultyMultiplier <= 0.5f -> "SURVIVAL TRIAL: 30 BURPEES OR 2-MIN WALL SIT"
+        difficultyMultiplier >= 1.5f -> "SURVIVAL TRIAL: 75 BURPEES OR 5-MIN WALL SIT"
+        else -> "SURVIVAL TRIAL: 50 BURPEES OR 3-MIN WALL SIT"
+    }
+
+    fun buildPenaltyDescription(missedDaysCount: Int, difficultyMultiplier: Float = 1.0f): String {
+        val task = getPenaltyTaskDescription(difficultyMultiplier)
+        return "Survival Trial: $task ($missedDaysCount missed quest deck(s))"
     }
 }

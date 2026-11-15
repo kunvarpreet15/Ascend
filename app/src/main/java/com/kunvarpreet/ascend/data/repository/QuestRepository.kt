@@ -3,15 +3,23 @@ package com.kunvarpreet.ascend.data.repository
 import android.content.Context
 import com.kunvarpreet.ascend.data.local.AscendDatabaseHelper
 import com.kunvarpreet.ascend.domain.model.DailyQuest
+import com.kunvarpreet.ascend.domain.model.PenaltyLog
 import com.kunvarpreet.ascend.domain.model.QuestRewardEvent
 import com.kunvarpreet.ascend.domain.model.RunCheckpoint
 import kotlinx.coroutines.flow.StateFlow
 
-class QuestRepository(context: Context) {
-    private val dbHelper = AscendDatabaseHelper.getInstance(context)
+class QuestRepository(
+    context: Context,
+    private val dbHelper: AscendDatabaseHelper = AscendDatabaseHelper.getInstance(context)
+) {
 
     val todayQuest: StateFlow<DailyQuest?> = dbHelper.todayQuestState
     val rewardEvent: StateFlow<QuestRewardEvent?> = dbHelper.rewardEvent
+    val activePenalty: StateFlow<PenaltyLog?> = dbHelper.activePenalty
+
+    fun clearPenalty(penaltyId: String): Boolean {
+        return dbHelper.clearPenalty(penaltyId)
+    }
 
     fun dismissRewardEvent() {
         dbHelper.dismissRewardEvent()

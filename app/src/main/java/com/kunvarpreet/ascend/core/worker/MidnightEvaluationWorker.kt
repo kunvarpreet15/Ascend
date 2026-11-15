@@ -33,7 +33,7 @@ class MidnightEvaluationWorker(
         dbHelper.refreshCache()
 
         // 2. Check if a penalty was triggered
-        val activePenalty = dbHelper.activePenalty
+        val activePenalty = dbHelper.activePenalty.value ?: dbHelper.getActivePenalty()
         if (activePenalty != null) {
             postPenaltyAlertNotification(context, activePenalty.penaltyTaskDescription)
         }

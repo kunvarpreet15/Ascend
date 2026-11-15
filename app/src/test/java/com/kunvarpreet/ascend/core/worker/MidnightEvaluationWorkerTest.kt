@@ -106,7 +106,7 @@ class MidnightEvaluationWorkerTest {
         db.insert("penalty_logs", null, cv)
         dbHelper.refreshCache()
 
-        assertNotNull(dbHelper.activePenalty)
+        assertNotNull(dbHelper.activePenalty.value)
 
         val worker = TestListenableWorkerBuilder<MidnightEvaluationWorker>(context).build()
         val result = runBlocking { worker.doWork() }

@@ -18,6 +18,7 @@ import com.kunvarpreet.ascend.domain.model.ExerciseTarget
 import com.kunvarpreet.ascend.domain.model.ExerciseType
 import com.kunvarpreet.ascend.domain.model.ExerciseUnit
 import com.kunvarpreet.ascend.domain.model.HunterProfile
+import com.kunvarpreet.ascend.domain.model.InventoryItem
 import com.kunvarpreet.ascend.domain.model.PenaltyLog
 import com.kunvarpreet.ascend.domain.model.QuestRewardEvent
 import com.kunvarpreet.ascend.domain.model.QuestStatus
@@ -47,14 +48,15 @@ class AscendDatabaseHelper(
     val rewardEvent: StateFlow<QuestRewardEvent?> = _rewardEvent.asStateFlow()
 
     private val _activePenaltyState = MutableStateFlow<PenaltyLog?>(null)
-    val activePenaltyState: StateFlow<PenaltyLog?> = _activePenaltyState.asStateFlow()
+    val activePenalty: StateFlow<PenaltyLog?> = _activePenaltyState.asStateFlow()
+    val activePenaltyState: StateFlow<PenaltyLog?> = activePenalty
 
-    val activePenalty: PenaltyLog?
-        get() = getActivePenalty()
+    private val _inventoryState = MutableStateFlow<List<InventoryItem>>(emptyList())
+    val inventoryState: StateFlow<List<InventoryItem>> = _inventoryState.asStateFlow()
 
     companion object {
         const val DATABASE_NAME = "ascend_rpg.db"
-        const val DATABASE_VERSION = 4
+        const val DATABASE_VERSION = 5
 
         @Volatile
         private var instance: AscendDatabaseHelper? = null
@@ -66,6 +68,10 @@ class AscendDatabaseHelper(
                     it.refreshCache()
                 }
             }
+        }
+
+        fun resetInstanceForTesting() {
+            instance = null
         }
     }
 
@@ -198,7 +204,7 @@ class AscendDatabaseHelper(
                 id TEXT PRIMARY KEY NOT NULL,
                 hunter_id TEXT NOT NULL,
                 item_code TEXT NOT NULL
-                    CHECK (item_code IN ('STREAK_SHIELD','STAMINA_POTION','TITLE_SHADOW_NOVICE','TITLE_ASCENDED_WARRIOR')),
+                    CHECK (item_code IN ('STREAK_SHIELD','STAMINA_POTION','TITLE_SHADOW_NOVICE','TITLE_ASCENDED_WARRIOR','TITLE_ASCENDED_SOVEREIGN')),
                 item_name TEXT NOT NULL,
                 quantity INTEGER NOT NULL DEFAULT 1,
                 acquired_at INTEGER NOT NULL,
@@ -244,6 +250,37 @@ class AscendDatabaseHelper(
             try {
                 db.execSQL("CREATE INDEX IF NOT EXISTS idx_run_gps_target ON run_gps_logs(target_id);")
                 db.execSQL("CREATE INDEX IF NOT EXISTS idx_run_gps_status ON run_gps_logs(status);")
+            } catch (_: Exception) {}
+        }
+        if (oldVersion < 5) {
+            try {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS inventory_items_temp (
+                        id TEXT PRIMARY KEY NOT NULL,
+                        hunter_id TEXT NOT NULL,
+                        item_code TEXT NOT NULL,
+                        item_name TEXT NOT NULL,
+                        quantity INTEGER NOT NULL DEFAULT 1,
+                        acquired_at INTEGER NOT NULL
+                    );
+                """.trimIndent())
+                db.execSQL("INSERT OR IGNORE INTO inventory_items_temp SELECT * FROM inventory_items;")
+                db.execSQL("DROP TABLE IF EXISTS inventory_items;")
+                db.execSQL("""
+                    CREATE TABLE inventory_items (
+                        id TEXT PRIMARY KEY NOT NULL,
+                        hunter_id TEXT NOT NULL,
+                        item_code TEXT NOT NULL
+                            CHECK (item_code IN ('STREAK_SHIELD','STAMINA_POTION','TITLE_SHADOW_NOVICE','TITLE_ASCENDED_WARRIOR','TITLE_ASCENDED_SOVEREIGN')),
+                        item_name TEXT NOT NULL,
+                        quantity INTEGER NOT NULL DEFAULT 1,
+                        acquired_at INTEGER NOT NULL,
+                        FOREIGN KEY (hunter_id) REFERENCES hunter_profiles(id) ON DELETE CASCADE
+                    );
+                """.trimIndent())
+                db.execSQL("INSERT OR IGNORE INTO inventory_items SELECT * FROM inventory_items_temp;")
+                db.execSQL("DROP TABLE IF EXISTS inventory_items_temp;")
+                db.execSQL("CREATE INDEX IF NOT EXISTS idx_inventory_hunter ON inventory_items(hunter_id);")
             } catch (_: Exception) {}
         }
         onCreate(db)
@@ -320,6 +357,7 @@ class AscendDatabaseHelper(
             longestStreak = hunterCursor.getInt(hunterCursor.getColumnIndexOrThrow("longest_streak"))
             val diffCol = hunterCursor.getColumnIndex("difficulty_multiplier")
             difficultyMultiplier = if (diffCol != -1) hunterCursor.getFloat(diffCol) else 1.0f
+            val equippedTitle = getEquippedTitleForHunter(db, hunterId)
 
             val profile = HunterProfile(
                 id = hunterId,
@@ -338,7 +376,8 @@ class AscendDatabaseHelper(
                 heightCm = hunterCursor.getFloat(hunterCursor.getColumnIndexOrThrow("height_cm")),
                 weightKg = hunterCursor.getFloat(hunterCursor.getColumnIndexOrThrow("weight_kg")),
                 isOnboarded = hunterCursor.getInt(hunterCursor.getColumnIndexOrThrow("is_onboarded")) == 1,
-                difficultyMultiplier = difficultyMultiplier
+                difficultyMultiplier = difficultyMultiplier,
+                equippedTitle = equippedTitle
             )
             _hunterState.value = profile
         }
@@ -401,7 +440,8 @@ class AscendDatabaseHelper(
                 todayDate = todayIso,
                 lastQuestStatus = lastQuestStatus,
                 currentStreak = currentStreak,
-                availableStreakShields = shieldsOwned
+                availableStreakShields = shieldsOwned,
+                difficultyMultiplier = difficultyMultiplier
             )
 
             when (catchUpResult) {
@@ -465,6 +505,7 @@ class AscendDatabaseHelper(
             if (updatedHunterCursor.moveToFirst()) {
                 val diffCol = updatedHunterCursor.getColumnIndex("difficulty_multiplier")
                 val diff = if (diffCol != -1) updatedHunterCursor.getFloat(diffCol) else 1.0f
+                val equippedTitle = getEquippedTitleForHunter(db, hunterId)
                 _hunterState.value = HunterProfile(
                     id = hunterId,
                     alias = updatedHunterCursor.getString(updatedHunterCursor.getColumnIndexOrThrow("alias")),
@@ -482,7 +523,8 @@ class AscendDatabaseHelper(
                     heightCm = updatedHunterCursor.getFloat(updatedHunterCursor.getColumnIndexOrThrow("height_cm")),
                     weightKg = updatedHunterCursor.getFloat(updatedHunterCursor.getColumnIndexOrThrow("weight_kg")),
                     isOnboarded = updatedHunterCursor.getInt(updatedHunterCursor.getColumnIndexOrThrow("is_onboarded")) == 1,
-                    difficultyMultiplier = diff
+                    difficultyMultiplier = diff,
+                    equippedTitle = equippedTitle
                 )
             }
             updatedHunterCursor.close()
@@ -536,6 +578,44 @@ class AscendDatabaseHelper(
         questCursor.close()
 
         _activePenaltyState.value = getActivePenalty(hunterId)
+
+        // Query Inventory Items
+        val invList = mutableListOf<InventoryItem>()
+        val invCursor = db.rawQuery(
+            "SELECT id, hunter_id, item_code, item_name, quantity, acquired_at FROM inventory_items WHERE hunter_id = ? ORDER BY acquired_at DESC",
+            arrayOf(hunterId)
+        )
+        while (invCursor.moveToNext()) {
+            invList.add(
+                InventoryItem(
+                    id = invCursor.getString(0),
+                    hunterId = invCursor.getString(1),
+                    itemCode = invCursor.getString(2),
+                    itemName = invCursor.getString(3),
+                    quantity = invCursor.getInt(4),
+                    acquiredAt = invCursor.getLong(5)
+                )
+            )
+        }
+        invCursor.close()
+        _inventoryState.value = invList
+    }
+
+    private fun getEquippedTitleForHunter(db: SQLiteDatabase, hunterId: String): String? {
+        val titleCursor = db.rawQuery(
+            "SELECT item_code, item_name FROM inventory_items WHERE hunter_id = ? AND item_code IN ('TITLE_ASCENDED_SOVEREIGN', 'TITLE_ASCENDED_WARRIOR', 'TITLE_SHADOW_NOVICE') LIMIT 1",
+            arrayOf(hunterId)
+        )
+        val title = if (titleCursor.moveToFirst()) {
+            val code = titleCursor.getString(0)
+            if (code == "TITLE_ASCENDED_SOVEREIGN") {
+                "ASCENDED SOVEREIGN"
+            } else {
+                titleCursor.getString(1).replace("Title: ", "").replace("TITLE: ", "").trim()
+            }
+        } else null
+        titleCursor.close()
+        return title
     }
 
     fun getActivePenalty(hunterId: String? = null): PenaltyLog? {
@@ -562,6 +642,10 @@ class AscendDatabaseHelper(
         return penalty
     }
 
+    fun clearPenalty(penaltyId: String): Boolean {
+        return clearActivePenalty(penaltyId)
+    }
+
     fun clearActivePenalty(penaltyId: String): Boolean {
         val db = writableDatabase
         val now = clock.nowMillis()
@@ -571,10 +655,172 @@ class AscendDatabaseHelper(
         }
         val rows = db.update("penalty_logs", cv, "id = ?", arrayOf(penaltyId))
         if (rows > 0) {
+            val cursor = db.rawQuery("SELECT hunter_id, triggered_date FROM penalty_logs WHERE id = ? LIMIT 1", arrayOf(penaltyId))
+            if (cursor.moveToFirst()) {
+                val hId = cursor.getString(0)
+                val date = cursor.getString(1)
+                val questCv = ContentValues().apply {
+                    put("status", QuestStatus.PENALTY_CLEARED.name)
+                }
+                db.update("daily_quests", questCv, "hunter_id = ? AND quest_date = ?", arrayOf(hId, date))
+            }
+            cursor.close()
             refreshCache()
             return true
         }
         return false
+    }
+
+    sealed interface PurchaseResult {
+        data object Success : PurchaseResult
+        data object InsufficientGold : PurchaseResult
+        data class Error(val message: String) : PurchaseResult
+    }
+
+    fun purchaseShopItem(hunterId: String, itemCode: String): PurchaseResult {
+        val cost = when (itemCode) {
+            "STREAK_SHIELD" -> 150L
+            "STAMINA_POTION" -> 100L
+            "TITLE_ASCENDED_SOVEREIGN" -> 500L
+            else -> return PurchaseResult.Error("Unknown item code: $itemCode")
+        }
+
+        val db = writableDatabase
+        var result: PurchaseResult = PurchaseResult.Error("Transaction failed")
+
+        db.beginTransaction()
+        try {
+            val cursor = db.rawQuery(
+                "SELECT gold_balance, level, current_xp, available_stat_points FROM hunter_profiles WHERE id = ? LIMIT 1",
+                arrayOf(hunterId)
+            )
+            if (!cursor.moveToFirst()) {
+                cursor.close()
+                return PurchaseResult.Error("Hunter not found")
+            }
+
+            val currentGold = cursor.getLong(0)
+            val currentLevel = cursor.getInt(1)
+            val currentXp = cursor.getLong(2)
+            val currentStatPoints = cursor.getInt(3)
+            cursor.close()
+
+            if (currentGold < cost) {
+                return PurchaseResult.InsufficientGold
+            }
+
+            val newGold = currentGold - cost
+            val now = clock.nowMillis()
+
+            when (itemCode) {
+                "STREAK_SHIELD" -> {
+                    addInventoryItem(
+                        hunterId = hunterId,
+                        itemCode = "STREAK_SHIELD",
+                        itemName = "Streak Shield",
+                        quantity = 1
+                    )
+                    val cv = ContentValues().apply {
+                        put("gold_balance", newGold)
+                        put("updated_at", now)
+                    }
+                    db.update("hunter_profiles", cv, "id = ?", arrayOf(hunterId))
+                }
+                "STAMINA_POTION" -> {
+                    // Instant +75 XP consumable boost
+                    val outcome = XpCalculator.applyXpGain(
+                        currentLevel = currentLevel,
+                        currentXp = currentXp,
+                        xpGained = 75
+                    )
+                    val cv = ContentValues().apply {
+                        put("gold_balance", newGold)
+                        put("level", outcome.newLevel)
+                        put("current_xp", outcome.remainingXp)
+                        put("xp_to_next_level", outcome.xpToNextLevel)
+                        put("available_stat_points", currentStatPoints + outcome.statPointsEarned)
+                        put("updated_at", now)
+                    }
+                    db.update("hunter_profiles", cv, "id = ?", arrayOf(hunterId))
+                    addInventoryItem(
+                        hunterId = hunterId,
+                        itemCode = "STAMINA_POTION",
+                        itemName = "Stamina Potion",
+                        quantity = 1
+                    )
+                }
+                "TITLE_ASCENDED_SOVEREIGN" -> {
+                    addInventoryItem(
+                        hunterId = hunterId,
+                        itemCode = "TITLE_ASCENDED_SOVEREIGN",
+                        itemName = "Title: Ascended Sovereign",
+                        quantity = 1
+                    )
+                    val cv = ContentValues().apply {
+                        put("gold_balance", newGold)
+                        put("updated_at", now)
+                    }
+                    db.update("hunter_profiles", cv, "id = ?", arrayOf(hunterId))
+                }
+            }
+
+            db.setTransactionSuccessful()
+            result = PurchaseResult.Success
+        } catch (e: Exception) {
+            result = PurchaseResult.Error(e.message ?: "Purchase error")
+        } finally {
+            db.endTransaction()
+        }
+
+        if (result is PurchaseResult.Success) {
+            refreshCache()
+        }
+        return result
+    }
+
+    fun promoteRank(hunterId: String? = null): Boolean {
+        val db = writableDatabase
+        var success = false
+
+        db.beginTransaction()
+        try {
+            val query = if (hunterId != null) {
+                "SELECT id, level, rank_tier FROM hunter_profiles WHERE id = ? LIMIT 1"
+            } else {
+                "SELECT id, level, rank_tier FROM hunter_profiles LIMIT 1"
+            }
+            val args = if (hunterId != null) arrayOf(hunterId) else null
+            val cursor = db.rawQuery(query, args)
+            if (cursor.moveToFirst()) {
+                val id = cursor.getString(0)
+                val level = cursor.getInt(1)
+                val currentRank = try {
+                    RankTier.valueOf(cursor.getString(2))
+                } catch (_: Exception) {
+                    RankTier.E
+                }
+                val nextRank = RankPolicy.nextRank(currentRank)
+                if (nextRank != null && RankPolicy.isEligibleForRankTrial(level, currentRank)) {
+                    val cv = ContentValues().apply {
+                        put("rank_tier", nextRank.name)
+                        put("updated_at", clock.nowMillis())
+                    }
+                    db.update("hunter_profiles", cv, "id = ?", arrayOf(id))
+                    db.setTransactionSuccessful()
+                    success = true
+                }
+            }
+            cursor.close()
+        } catch (_: Exception) {
+            success = false
+        } finally {
+            db.endTransaction()
+        }
+
+        if (success) {
+            refreshCache()
+        }
+        return success
     }
 
     private fun ensureTodayQuestExists(

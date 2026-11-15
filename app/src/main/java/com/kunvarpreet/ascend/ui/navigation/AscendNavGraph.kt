@@ -16,12 +16,17 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.kunvarpreet.ascend.data.repository.HunterRepository
+import com.kunvarpreet.ascend.data.repository.QuestRepository
 import com.kunvarpreet.ascend.domain.model.ExerciseType
 import com.kunvarpreet.ascend.ui.components.AscendBottomNavBar
 import com.kunvarpreet.ascend.ui.dashboard.DashboardScreen
 import com.kunvarpreet.ascend.ui.dashboard.DashboardViewModel
 import com.kunvarpreet.ascend.ui.evolution.EvolutionScreen
 import com.kunvarpreet.ascend.ui.onboarding.OnboardingScreen
+import com.kunvarpreet.ascend.ui.penalty.PenaltyScreen
+import com.kunvarpreet.ascend.ui.penalty.PenaltyViewModel
+import com.kunvarpreet.ascend.ui.promotion.PromotionScreen
+import com.kunvarpreet.ascend.ui.promotion.PromotionViewModel
 import com.kunvarpreet.ascend.ui.running.RunningScreen
 import com.kunvarpreet.ascend.ui.running.RunningViewModel
 import com.kunvarpreet.ascend.ui.shop.ShopScreen
@@ -35,7 +40,9 @@ fun AscendApp(
 ) {
     val context = LocalContext.current
     val hunterRepo = remember { HunterRepository(context) }
+    val questRepo = remember { QuestRepository(context) }
     val hunterProfile by hunterRepo.hunterProfile.collectAsState()
+    val activePenalty by questRepo.activePenalty.collectAsState()
 
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -47,6 +54,15 @@ fun AscendApp(
                 navController.navigate(Screen.Onboarding.route) {
                     popUpTo(0) { inclusive = true }
                 }
+            }
+        }
+    }
+
+    // Automatically route to Penalty Screen when activePenalty != null
+    LaunchedEffect(activePenalty) {
+        if (activePenalty != null && currentRoute != Screen.Penalty.route) {
+            navController.navigate(Screen.Penalty.route) {
+                launchSingleTop = true
             }
         }
     }
@@ -107,7 +123,11 @@ fun AscendApp(
             }
 
             composable(Screen.Status.route) {
-                StatusScreen()
+                StatusScreen(
+                    onNavigateToPromotion = {
+                        navController.navigate(Screen.Promotion.route)
+                    }
+                )
             }
 
             composable(Screen.Shop.route) {
@@ -116,6 +136,31 @@ fun AscendApp(
 
             composable(Screen.Evolution.route) {
                 EvolutionScreen()
+            }
+
+            composable(Screen.Penalty.route) {
+                val penaltyViewModel: PenaltyViewModel = viewModel()
+                PenaltyScreen(
+                    viewModel = penaltyViewModel,
+                    onPenaltyCleared = {
+                        navController.navigate(Screen.Dashboard.route) {
+                            popUpTo(Screen.Penalty.route) { inclusive = true }
+                        }
+                    }
+                )
+            }
+
+            composable(Screen.Promotion.route) {
+                val promotionViewModel: PromotionViewModel = viewModel()
+                PromotionScreen(
+                    viewModel = promotionViewModel,
+                    onBack = { navController.popBackStack() },
+                    onPromotionComplete = {
+                        navController.navigate(Screen.Status.route) {
+                            popUpTo(Screen.Promotion.route) { inclusive = true }
+                        }
+                    }
+                )
             }
 
             composable(Screen.Workout.route) { backStackEntry ->

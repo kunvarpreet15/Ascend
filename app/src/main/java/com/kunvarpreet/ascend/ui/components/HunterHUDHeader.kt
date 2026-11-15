@@ -60,13 +60,33 @@ fun HunterHUDHeader(
                 RankBadge(rank = hunter.rankTier)
                 Spacer(modifier = Modifier.width(10.dp))
                 Column {
-                    Text(
-                        text = hunter.alias,
-                        color = TextPrimary,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.5.sp
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = hunter.alias,
+                            color = TextPrimary,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.5.sp
+                        )
+                        if (!hunter.equippedTitle.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(MonarchGold.copy(alpha = 0.15f))
+                                    .border(1.dp, MonarchGold, RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = hunter.equippedTitle,
+                                    color = MonarchGold,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        }
+                    }
                     Text(
                         text = hunter.rankTier.title,
                         color = TextMuted,

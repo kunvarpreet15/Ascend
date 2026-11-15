@@ -30,6 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.kunvarpreet.ascend.domain.engine.RankPolicy
 import com.kunvarpreet.ascend.ui.components.HunterHUDHeader
 import com.kunvarpreet.ascend.ui.theme.BorderSubtle
 import com.kunvarpreet.ascend.ui.theme.CardSurface
@@ -44,13 +45,17 @@ import com.kunvarpreet.ascend.ui.theme.VoidBlack
 @Composable
 fun StatusScreen(
     modifier: Modifier = Modifier,
-    viewModel: StatusViewModel = viewModel()
+    viewModel: StatusViewModel = viewModel(),
+    onNavigateToPromotion: () -> Unit = {}
 ) {
     val hunter by viewModel.hunterProfile.collectAsState()
     val stats by viewModel.statsState.collectAsState()
     val haptic = LocalHapticFeedback.current
 
     val availablePoints = hunter?.availableStatPoints ?: 0
+    val isEligibleForPromotion = hunter?.let {
+        RankPolicy.isEligibleForRankTrial(it.level, it.rankTier)
+    } ?: false
 
     Column(
         modifier = modifier
@@ -79,6 +84,62 @@ fun StatusScreen(
             )
 
             Spacer(modifier = Modifier.height(16.dp))
+
+            // Glowing Rank Promotion Trial Banner
+            if (isEligibleForPromotion) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MonarchGold.copy(alpha = 0.18f))
+                        .border(1.5.dp, MonarchGold, RoundedCornerShape(10.dp))
+                        .clickable {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onNavigateToPromotion()
+                        }
+                        .padding(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "RANK PROMOTION TRIAL AVAILABLE",
+                                color = MonarchGold,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Black,
+                                fontFamily = FontFamily.Monospace,
+                                letterSpacing = 0.5.sp
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Milestone fitness challenge unlocked. Tap to enter trial dungeon.",
+                                color = TextPrimary,
+                                fontSize = 10.sp
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(MonarchGold)
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = "ENTER",
+                                color = OnMonarchGold,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Black,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+            }
 
             // Available Stat Points Banner
             val isPointsAvailable = availablePoints > 0
