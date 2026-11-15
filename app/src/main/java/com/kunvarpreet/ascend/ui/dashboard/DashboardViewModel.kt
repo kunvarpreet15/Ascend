@@ -8,6 +8,7 @@ import com.kunvarpreet.ascend.data.repository.QuestRepository
 import com.kunvarpreet.ascend.domain.model.DailyQuest
 import com.kunvarpreet.ascend.domain.model.HunterProfile
 import com.kunvarpreet.ascend.domain.model.QuestRewardEvent
+import com.kunvarpreet.ascend.domain.model.UnitSystem
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -22,6 +23,7 @@ data class DashboardUiState(
     val hunter: HunterProfile? = null,
     val todayQuest: DailyQuest? = null,
     val timeRemainingUntilMidnight: String = "00:00:00",
+    val isMetric: Boolean = true,
     val isLoading: Boolean = false
 )
 
@@ -41,12 +43,14 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     val uiState: StateFlow<DashboardUiState> = combine(
         hunterRepo.hunterProfile,
         questRepo.todayQuest,
+        hunterRepo.preferencesState,
         _timeRemaining
-    ) { hunter, quest, time ->
+    ) { hunter, quest, preferences, time ->
         DashboardUiState(
             hunter = hunter,
             todayQuest = quest,
             timeRemainingUntilMidnight = time,
+            isMetric = preferences.unitSystem == UnitSystem.METRIC,
             isLoading = false
         )
     }.stateIn(

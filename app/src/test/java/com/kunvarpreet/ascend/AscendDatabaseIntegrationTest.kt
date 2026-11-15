@@ -4,9 +4,13 @@ import android.content.ContentValues
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.kunvarpreet.ascend.data.local.AscendDatabaseHelper
+import com.kunvarpreet.ascend.data.local.AscendDatabaseHelper.PurchaseResult
 import com.kunvarpreet.ascend.domain.engine.FakeAscendClock
+import com.kunvarpreet.ascend.domain.engine.RankPolicy
 import com.kunvarpreet.ascend.domain.model.QuestStatus
 import com.kunvarpreet.ascend.domain.model.RankTier
+import com.kunvarpreet.ascend.domain.model.RestDayOfWeek
+import com.kunvarpreet.ascend.domain.model.UserPreferences
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -326,5 +330,129 @@ class AscendDatabaseIntegrationTest {
         val discarded = dbHelper.finalizeOrDiscardRunCheckpoint(discardSessionId, finalizeAndSave = false)
         assertTrue(discarded)
         assertNull(dbHelper.getActiveInProgressRun(runTargetId))
+    }
+
+    @Test
+    fun testTieredPenaltyZoneCreationAndClearing() {
+        // 1. Advance clock by 2 calendar days without completing quests or possessing shields
+        dbHelper.writableDatabase.delete("inventory_items", null, null)
+        clock.setIsoDate("2026-11-13")
+        dbHelper.refreshCache()
+
+        // 2. Penalty log must be triggered
+        val penalty = dbHelper.activePenaltyState.value
+        assertNotNull("Expected active penalty after missed day without shields", penalty)
+        assertFalse(penalty!!.isCleared)
+        assertTrue(
+            "Expected survival penalty task, got: ${penalty.penaltyTaskDescription}",
+            penalty.penaltyTaskDescription.contains("SURVIVAL TRIAL")
+        )
+
+        // 3. Clear penalty
+        val cleared = dbHelper.clearPenalty(penalty.id)
+        assertTrue(cleared)
+
+        // 4. Active penalty state should now be null
+        dbHelper.refreshCache()
+        assertNull(dbHelper.activePenaltyState.value)
+
+        // 5. Verify database row is marked cleared
+        val cursor = dbHelper.readableDatabase.rawQuery(
+            "SELECT is_cleared, cleared_at FROM penalty_logs WHERE id = ?",
+            arrayOf(penalty.id)
+        )
+        assertTrue(cursor.moveToFirst())
+        assertEquals(1, cursor.getInt(0))
+        assertFalse(cursor.isNull(1))
+        cursor.close()
+    }
+
+    @Test
+    fun testShopGoldDeductionAndStreakShieldInventoryIncrement() {
+        // Set gold balance to 300
+        dbHelper.writableDatabase.execSQL("UPDATE hunter_profiles SET gold_balance = 300")
+        dbHelper.refreshCache()
+        assertEquals(300L, dbHelper.hunterState.value!!.goldBalance)
+
+        val initialShieldCount = dbHelper.inventoryState.value.find { it.itemCode == "STREAK_SHIELD" }?.quantity ?: 0
+        assertEquals(0, initialShieldCount)
+
+        val hunterId = dbHelper.hunterState.value!!.id
+
+        // 1. Buy Streak Shield for 150 gold
+        val purchaseResult = dbHelper.purchaseShopItem(hunterId, "STREAK_SHIELD")
+        assertTrue(purchaseResult is PurchaseResult.Success)
+
+        // 2. Verify gold deducted to 150
+        assertEquals(150L, dbHelper.hunterState.value!!.goldBalance)
+
+        // 3. Verify inventory count incremented
+        val updatedShieldCount = dbHelper.inventoryState.value.find { it.itemCode == "STREAK_SHIELD" }?.quantity ?: 0
+        assertEquals(1, updatedShieldCount)
+
+        // 4. Attempt purchase exceeding gold balance (costs 500 gold)
+        val insufficientResult = dbHelper.purchaseShopItem(hunterId, "TITLE_ASCENDED_SOVEREIGN")
+        assertTrue(insufficientResult is PurchaseResult.InsufficientGold)
+        assertEquals(150L, dbHelper.hunterState.value!!.goldBalance)
+    }
+
+    @Test
+    fun testRankPromotionTrialGateOnlyAfterReachingMilestone() {
+        // Starts at Level 1, Rank E
+        assertEquals(1, dbHelper.hunterState.value!!.level)
+        assertEquals(RankTier.E, dbHelper.hunterState.value!!.rankTier)
+        assertFalse(RankPolicy.isEligibleForRankTrial(1, RankTier.E))
+
+        // Premature promotion must fail
+        val prematurePromotion = dbHelper.promoteRank()
+        assertFalse(prematurePromotion)
+        assertEquals(RankTier.E, dbHelper.hunterState.value!!.rankTier)
+
+        // Level up to Level 10 (E -> D promotion threshold)
+        dbHelper.writableDatabase.execSQL("UPDATE hunter_profiles SET level = 10")
+        dbHelper.refreshCache()
+        assertTrue(RankPolicy.isEligibleForRankTrial(10, RankTier.E))
+
+        // Complete promotion trial
+        val promoted = dbHelper.promoteRank()
+        assertTrue(promoted)
+        assertEquals(RankTier.D, dbHelper.hunterState.value!!.rankTier)
+
+        // Once promoted to D, eligibility resets until Level 25
+        assertFalse(RankPolicy.isEligibleForRankTrial(10, RankTier.D))
+        assertFalse(dbHelper.promoteRank())
+    }
+
+    @Test
+    fun testScheduledRestDayExemptionInCatchUpEvaluator() {
+        // Initial date is 2026-11-11 (Wednesday)
+        // Set hunter streak to 7
+        dbHelper.writableDatabase.execSQL("UPDATE hunter_profiles SET current_streak = 7")
+        val hunterId = dbHelper.hunterState.value!!.id
+        dbHelper.saveUserPreferences(UserPreferences(hunterId = hunterId, scheduledRestDay = RestDayOfWeek.WEDNESDAY))
+        dbHelper.refreshCache()
+
+        // Wednesday quest left in PENDING status
+        assertEquals(QuestStatus.PENDING, dbHelper.todayQuestState.value!!.status)
+
+        // Clear any shields
+        dbHelper.writableDatabase.delete("inventory_items", null, null)
+
+        // Advance to Thursday (2026-11-12)
+        clock.setIsoDate("2026-11-12")
+        dbHelper.refreshCache()
+
+        // Wednesday was the scheduled rest day -> Streak preserved, no penalty
+        assertEquals(7, dbHelper.hunterState.value!!.currentStreak)
+        assertNull(dbHelper.activePenaltyState.value)
+
+        // Wednesday's quest status updated to REST_DAY_EXEMPT
+        val cursor = dbHelper.readableDatabase.rawQuery(
+            "SELECT status FROM daily_quests WHERE quest_date = '2026-11-11'",
+            null
+        )
+        assertTrue(cursor.moveToFirst())
+        assertEquals(QuestStatus.REST_DAY_EXEMPT.name, cursor.getString(0))
+        cursor.close()
     }
 }

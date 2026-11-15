@@ -36,6 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.kunvarpreet.ascend.domain.model.UnitSystem
 import com.kunvarpreet.ascend.ui.theme.BorderSubtle
 import com.kunvarpreet.ascend.ui.theme.CardSurface
 import com.kunvarpreet.ascend.ui.theme.DarkSurface
@@ -72,6 +73,7 @@ fun OnboardingScreen(
                     onHeightChange = viewModel::updateHeight,
                     onWeightChange = viewModel::updateWeight,
                     onDifficultyChange = viewModel::updateDifficulty,
+                    onUnitSystemChange = viewModel::updateUnitSystem,
                     onProceed = {
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         viewModel.proceedToAwakening()
@@ -98,8 +100,11 @@ private fun AssessmentStep(
     onHeightChange: (Float) -> Unit,
     onWeightChange: (Float) -> Unit,
     onDifficultyChange: (Float) -> Unit,
+    onUnitSystemChange: (UnitSystem) -> Unit,
     onProceed: () -> Unit
 ) {
+    val haptic = LocalHapticFeedback.current
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -152,10 +157,79 @@ private fun AssessmentStep(
             )
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // Unit System Toggle
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text(
+                text = "UNIT MEASUREMENT SYSTEM",
+                color = TextPrimary,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(CardSurface)
+                    .border(1.dp, BorderSubtle, RoundedCornerShape(8.dp))
+                    .padding(3.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(if (uiState.unitSystem == UnitSystem.METRIC) ElectricCyan else DarkSurface)
+                        .clickable {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onUnitSystemChange(UnitSystem.METRIC)
+                        }
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "METRIC (KG / KM)",
+                        color = if (uiState.unitSystem == UnitSystem.METRIC) OnElectricCyan else TextMuted,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(if (uiState.unitSystem == UnitSystem.IMPERIAL) ElectricCyan else DarkSurface)
+                        .clickable {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onUnitSystemChange(UnitSystem.IMPERIAL)
+                        }
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "IMPERIAL (LBS / MI)",
+                        color = if (uiState.unitSystem == UnitSystem.IMPERIAL) OnElectricCyan else TextMuted,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
 
         // 2. Height Slider
         Column(modifier = Modifier.fillMaxWidth()) {
+            val heightDisplay = if (uiState.unitSystem == UnitSystem.METRIC) {
+                "${uiState.heightCm.roundToInt()} cm"
+            } else {
+                val totalInches = (uiState.heightCm / 2.54f).roundToInt()
+                "${totalInches / 12}' ${totalInches % 12}\""
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -169,7 +243,7 @@ private fun AssessmentStep(
                     fontFamily = FontFamily.Monospace
                 )
                 Text(
-                    text = "${uiState.heightCm.roundToInt()} cm",
+                    text = heightDisplay,
                     color = ElectricCyan,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.ExtraBold,
@@ -193,6 +267,12 @@ private fun AssessmentStep(
 
         // 3. Weight Slider
         Column(modifier = Modifier.fillMaxWidth()) {
+            val weightDisplay = if (uiState.unitSystem == UnitSystem.METRIC) {
+                String.format(LocalLocale.current.platformLocale, "%.1f kg", uiState.weightKg)
+            } else {
+                val lbs = uiState.weightKg * 2.20462f
+                String.format(LocalLocale.current.platformLocale, "%.1f lbs", lbs)
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -206,7 +286,7 @@ private fun AssessmentStep(
                     fontFamily = FontFamily.Monospace
                 )
                 Text(
-                    text = String.format(LocalLocale.current.platformLocale, "%.1f kg", uiState.weightKg),
+                    text = weightDisplay,
                     color = ElectricCyan,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.ExtraBold,

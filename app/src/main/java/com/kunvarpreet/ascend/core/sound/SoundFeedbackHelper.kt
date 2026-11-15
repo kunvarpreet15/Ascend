@@ -15,7 +15,13 @@ import android.util.Log
  */
 class SoundFeedbackHelper(private val context: Context) {
 
+    companion object {
+        @Volatile
+        var isSoundEnabled: Boolean = true
+    }
+
     fun playTimerCompletionTone() {
+        if (!isSoundEnabled) return
         try {
             val toneGen = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80)
             toneGen.startTone(ToneGenerator.TONE_PROP_BEEP, 350)

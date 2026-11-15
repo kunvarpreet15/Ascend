@@ -49,7 +49,8 @@ import com.kunvarpreet.ascend.ui.theme.TextPrimary
 fun QuestDeckCard(
     target: ExerciseTarget,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isMetric: Boolean = true
 ) {
     val isCompleted = target.isCompleted
     val animatedProgress by animateFloatAsState(
@@ -102,7 +103,7 @@ fun QuestDeckCard(
                         letterSpacing = 0.5.sp
                     )
                     Text(
-                        text = "Goal: ${target.formattedTarget}",
+                        text = "Goal: ${target.formatTarget(isMetric)}",
                         color = TextMuted,
                         fontSize = 11.sp
                     )
@@ -186,7 +187,7 @@ fun QuestDeckCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "${target.formattedCompleted} / ${target.formattedTarget}",
+                text = "${target.formatCompleted(isMetric)} / ${target.formatTarget(isMetric)}",
                 color = if (isCompleted) EmeraldSuccess else ElectricCyan,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,

@@ -51,7 +51,8 @@ fun DashboardScreen(
     viewModel: DashboardViewModel,
     onTargetClick: (ExerciseTarget) -> Unit,
     modifier: Modifier = Modifier,
-    onNavigateToStatus: (() -> Unit)? = null
+    onNavigateToStatus: (() -> Unit)? = null,
+    onNavigateToSettings: (() -> Unit)? = null
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val rewardEvent by viewModel.rewardEvent.collectAsState()
@@ -90,7 +91,10 @@ fun DashboardScreen(
             .background(VoidBlack)
     ) {
         // Top Hunter HUD Header
-        HunterHUDHeader(hunter = hunter)
+        HunterHUDHeader(
+            hunter = hunter,
+            onSettingsClick = onNavigateToSettings
+        )
 
         LazyColumn(
             modifier = Modifier
@@ -142,7 +146,8 @@ fun DashboardScreen(
                 items(todayQuest.targets, key = { it.id }) { target ->
                     QuestDeckCard(
                         target = target,
-                        onClick = { onTargetClick(target) }
+                        onClick = { onTargetClick(target) },
+                        isMetric = uiState.isMetric
                     )
                 }
             } else {

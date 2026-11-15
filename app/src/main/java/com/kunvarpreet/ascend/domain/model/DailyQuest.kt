@@ -6,7 +6,8 @@ enum class QuestStatus {
     PENDING,
     COMPLETED,
     FAILED,
-    PENALTY_CLEARED
+    PENALTY_CLEARED,
+    REST_DAY_EXEMPT
 }
 
 enum class ExerciseType(val displayName: String, val defaultTarget: Float, val unit: ExerciseUnit) {
@@ -36,24 +37,38 @@ data class ExerciseTarget(
         get() = if (targetQuantity > 0) (completedQuantity / targetQuantity).coerceIn(0f, 1f) else 0f
 
     val formattedTarget: String
-        get() = when (unit) {
-            ExerciseUnit.METERS -> {
+        get() = formatTarget(isMetric = true)
+
+    fun formatTarget(isMetric: Boolean = true): String = when (unit) {
+        ExerciseUnit.METERS -> {
+            if (isMetric) {
                 val km = targetQuantity / 1000f
                 "%.1f km".format(km)
+            } else {
+                val miles = (targetQuantity / 1000f) * 0.621371f
+                "%.1f mi".format(miles)
             }
-            ExerciseUnit.REPS -> "%.0f Reps".format(targetQuantity)
-            ExerciseUnit.SECONDS -> "%.0fs".format(targetQuantity)
         }
+        ExerciseUnit.REPS -> "%.0f Reps".format(targetQuantity)
+        ExerciseUnit.SECONDS -> "%.0fs".format(targetQuantity)
+    }
 
     val formattedCompleted: String
-        get() = when (unit) {
-            ExerciseUnit.METERS -> {
+        get() = formatCompleted(isMetric = true)
+
+    fun formatCompleted(isMetric: Boolean = true): String = when (unit) {
+        ExerciseUnit.METERS -> {
+            if (isMetric) {
                 val km = completedQuantity / 1000f
                 "%.1f km".format(km)
+            } else {
+                val miles = (completedQuantity / 1000f) * 0.621371f
+                "%.1f mi".format(miles)
             }
-            ExerciseUnit.REPS -> "%.0f".format(completedQuantity)
-            ExerciseUnit.SECONDS -> "%.0fs".format(completedQuantity)
         }
+        ExerciseUnit.REPS -> "%.0f".format(completedQuantity)
+        ExerciseUnit.SECONDS -> "%.0fs".format(completedQuantity)
+    }
 }
 
 data class DailyQuest(

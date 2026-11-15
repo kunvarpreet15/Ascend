@@ -29,6 +29,8 @@ import com.kunvarpreet.ascend.ui.promotion.PromotionScreen
 import com.kunvarpreet.ascend.ui.promotion.PromotionViewModel
 import com.kunvarpreet.ascend.ui.running.RunningScreen
 import com.kunvarpreet.ascend.ui.running.RunningViewModel
+import com.kunvarpreet.ascend.ui.settings.SettingsScreen
+import com.kunvarpreet.ascend.ui.settings.SettingsViewModel
 import com.kunvarpreet.ascend.ui.shop.ShopScreen
 import com.kunvarpreet.ascend.ui.status.StatusScreen
 import com.kunvarpreet.ascend.ui.workout.WorkoutScreen
@@ -118,6 +120,9 @@ fun AscendApp(
                     },
                     onNavigateToStatus = {
                         navController.navigate(Screen.Status.route)
+                    },
+                    onNavigateToSettings = {
+                        navController.navigate(Screen.Settings.route)
                     }
                 )
             }
@@ -186,6 +191,14 @@ fun AscendApp(
                     onNavigateToStatus = {
                         navController.navigate(Screen.Status.route)
                     }
+                )
+            }
+
+            composable(Screen.Settings.route) {
+                val settingsViewModel: SettingsViewModel = viewModel()
+                SettingsScreen(
+                    viewModel = settingsViewModel,
+                    onBack = { navController.popBackStack() }
                 )
             }
         }

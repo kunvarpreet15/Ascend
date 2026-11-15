@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.milliseconds
 
 enum class PenaltyMode {
     BURPEES,
@@ -101,7 +102,7 @@ class PenaltyViewModel(application: Application) : AndroidViewModel(application)
         timerJob?.cancel()
         timerJob = viewModelScope.launch {
             while (_timerSecondsRemaining.value > 0 && _isTimerRunning.value) {
-                delay(1000L)
+                delay(1000L.milliseconds)
                 if (_isTimerRunning.value) {
                     val remaining = _timerSecondsRemaining.value - 1
                     _timerSecondsRemaining.value = remaining

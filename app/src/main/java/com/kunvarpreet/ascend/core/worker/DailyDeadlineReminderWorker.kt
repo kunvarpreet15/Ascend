@@ -31,12 +31,14 @@ class DailyDeadlineReminderWorker(
         dbHelper.refreshCache()
 
         val todayQuest = dbHelper.todayQuestState.value
-        if (todayQuest != null && !todayQuest.isAllCompleted) {
-            postReminderNotification(context)
+        val prefs = dbHelper.preferencesState.value
+        if (prefs.dailyReminderEnabled) {
+            if (todayQuest != null && !todayQuest.isAllCompleted) {
+                postReminderNotification(context)
+            }
+            // Schedule next reminder
+            schedule(context, targetHour = prefs.dailyReminderHour, enabled = true)
         }
-
-        // Schedule next reminder for tomorrow 21:00
-        schedule(context)
 
         return Result.success()
     }
@@ -95,13 +97,13 @@ class DailyDeadlineReminderWorker(
         const val CHANNEL_ID_DEADLINE = "ascend_deadline_reminders"
         const val NOTIFICATION_ID_DEADLINE = 9002
 
-        fun calculateDelayToNext2100(currentTimeMillis: Long = System.currentTimeMillis()): Long {
+        fun calculateDelayToNextHour(targetHour: Int, currentTimeMillis: Long = System.currentTimeMillis()): Long {
             val now = Calendar.getInstance().apply {
                 timeInMillis = currentTimeMillis
             }
             val target = Calendar.getInstance().apply {
                 timeInMillis = currentTimeMillis
-                set(Calendar.HOUR_OF_DAY, 21)
+                set(Calendar.HOUR_OF_DAY, targetHour)
                 set(Calendar.MINUTE, 0)
                 set(Calendar.SECOND, 0)
                 set(Calendar.MILLISECOND, 0)
@@ -112,14 +114,23 @@ class DailyDeadlineReminderWorker(
             return target.timeInMillis - now.timeInMillis
         }
 
-        fun schedule(context: Context) {
-            val delayMillis = calculateDelayToNext2100()
+        fun calculateDelayToNext2100(currentTimeMillis: Long = System.currentTimeMillis()): Long {
+            return calculateDelayToNextHour(21, currentTimeMillis)
+        }
+
+        fun schedule(context: Context, targetHour: Int = 22, enabled: Boolean = true) {
+            val workManager = WorkManager.getInstance(context)
+            if (!enabled) {
+                workManager.cancelUniqueWork(WORK_NAME)
+                return
+            }
+            val delayMillis = calculateDelayToNextHour(targetHour)
             val workRequest = OneTimeWorkRequestBuilder<DailyDeadlineReminderWorker>()
                 .setInitialDelay(delayMillis, TimeUnit.MILLISECONDS)
                 .addTag(WORK_NAME)
                 .build()
 
-            WorkManager.getInstance(context).enqueueUniqueWork(
+            workManager.enqueueUniqueWork(
                 WORK_NAME,
                 ExistingWorkPolicy.REPLACE,
                 workRequest

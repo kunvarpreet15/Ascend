@@ -6,10 +6,12 @@ import androidx.lifecycle.viewModelScope
 import com.kunvarpreet.ascend.core.location.LatLng
 import com.kunvarpreet.ascend.core.location.RunState
 import com.kunvarpreet.ascend.core.location.RunTrackingService
+import com.kunvarpreet.ascend.data.repository.HunterRepository
 import com.kunvarpreet.ascend.data.repository.QuestRepository
 import com.kunvarpreet.ascend.domain.model.ExerciseTarget
 import com.kunvarpreet.ascend.domain.model.QuestRewardEvent
 import com.kunvarpreet.ascend.domain.model.RunCheckpoint
+import com.kunvarpreet.ascend.domain.model.UnitSystem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -35,11 +37,13 @@ data class RunningUiState(
     val hasNotificationPermission: Boolean = false,
     val isLoading: Boolean = false,
     val gpsPointsCount: Int = 0,
-    val unrecoveredCheckpoint: RunCheckpoint? = null
+    val unrecoveredCheckpoint: RunCheckpoint? = null,
+    val isMetric: Boolean = true
 )
 
 class RunningViewModel(application: Application) : AndroidViewModel(application) {
     private val questRepo = QuestRepository(application)
+    private val hunterRepo = HunterRepository(application)
 
     private val _uiState = MutableStateFlow(RunningUiState(isLoading = true))
     val uiState: StateFlow<RunningUiState> = _uiState.asStateFlow()
@@ -53,10 +57,29 @@ class RunningViewModel(application: Application) : AndroidViewModel(application)
     private var indoorTimerJob: Job? = null
 
     init {
+        // Collect user preference for unit system
+        viewModelScope.launch {
+            hunterRepo.preferencesState.collect { prefs ->
+                val isMetric = prefs.unitSystem == UnitSystem.METRIC
+                _uiState.update { current ->
+                    current.copy(
+                        isMetric = isMetric,
+                        paceFormatted = calculatePaceString(current.sessionMeters, current.elapsedSeconds, isMetric)
+                    )
+                }
+            }
+        }
+
         // Collect and sync live state from Foreground Service in Outdoor GPS mode
         viewModelScope.launch {
             RunTrackingService.sessionState.collect { gpsSession ->
                 if (_uiState.value.isGpsMode) {
+                    val isMetric = _uiState.value.isMetric
+                    val livePace = if (isMetric) {
+                        gpsSession.paceFormatted
+                    } else {
+                        calculatePaceString(gpsSession.distanceMeters, gpsSession.elapsedSeconds, false)
+                    }
                     when (gpsSession.state) {
                         RunState.RUNNING -> {
                             _uiState.update { current ->
@@ -66,7 +89,7 @@ class RunningViewModel(application: Application) : AndroidViewModel(application)
                                     elapsedSeconds = gpsSession.elapsedSeconds,
                                     sessionMeters = gpsSession.distanceMeters,
                                     caloriesBurned = gpsSession.caloriesBurned,
-                                    paceFormatted = gpsSession.paceFormatted,
+                                    paceFormatted = livePace,
                                     gpsPointsCount = gpsSession.waypoints.size
                                 )
                             }
@@ -79,7 +102,7 @@ class RunningViewModel(application: Application) : AndroidViewModel(application)
                                     elapsedSeconds = gpsSession.elapsedSeconds,
                                     sessionMeters = gpsSession.distanceMeters,
                                     caloriesBurned = gpsSession.caloriesBurned,
-                                    paceFormatted = gpsSession.paceFormatted,
+                                    paceFormatted = livePace,
                                     gpsPointsCount = gpsSession.waypoints.size
                                 )
                             }
@@ -220,7 +243,7 @@ class RunningViewModel(application: Application) : AndroidViewModel(application)
                 delay(1000L.milliseconds)
                 val newElapsed = _uiState.value.elapsedSeconds + 1
                 val meters = _uiState.value.sessionMeters
-                val paceStr = calculatePaceString(meters, newElapsed)
+                val paceStr = calculatePaceString(meters, newElapsed, _uiState.value.isMetric)
                 val calories = (meters * 0.065f).toInt()
                 _uiState.update {
                     it.copy(
@@ -237,7 +260,7 @@ class RunningViewModel(application: Application) : AndroidViewModel(application)
         if (_uiState.value.isGpsMode) return
         val newMeters = _uiState.value.sessionMeters + meters
         val elapsed = _uiState.value.elapsedSeconds
-        val paceStr = calculatePaceString(newMeters, elapsed)
+        val paceStr = calculatePaceString(newMeters, elapsed, _uiState.value.isMetric)
         val calories = (newMeters * 0.065f).toInt()
         _uiState.update {
             it.copy(
@@ -293,16 +316,29 @@ class RunningViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private fun calculatePaceString(meters: Float, seconds: Int): String {
-        if (meters < 50f || seconds < 5) return "--'--\" /km"
-        val km = meters / 1000f
-        val secPerKm = (seconds / km).toInt()
-        val paceMin = secPerKm / 60
-        val paceSec = secPerKm % 60
-        return if (paceMin in 2..29) {
-            String.format(Locale.US, "%d'%02d\" /km", paceMin, paceSec)
+    private fun calculatePaceString(meters: Float, seconds: Int, isMetric: Boolean = true): String {
+        if (isMetric) {
+            if (meters < 50f || seconds < 5) return "--'--\" /km"
+            val km = meters / 1000f
+            val secPerKm = (seconds / km).toInt()
+            val paceMin = secPerKm / 60
+            val paceSec = secPerKm % 60
+            return if (paceMin in 2..29) {
+                String.format(Locale.US, "%d'%02d\" /km", paceMin, paceSec)
+            } else {
+                "--'--\" /km"
+            }
         } else {
-            "--'--\" /km"
+            val miles = (meters / 1000f) * 0.621371f
+            if (miles < 0.03f || seconds < 5) return "--'--\" /mi"
+            val secPerMi = (seconds / miles).toInt()
+            val paceMin = secPerMi / 60
+            val paceSec = secPerMi % 60
+            return if (paceMin in 3..45) {
+                String.format(Locale.US, "%d'%02d\" /mi", paceMin, paceSec)
+            } else {
+                "--'--\" /mi"
+            }
         }
     }
 

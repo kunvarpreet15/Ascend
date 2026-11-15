@@ -147,6 +147,11 @@ fun RunningScreen(
     val elapsedMin = uiState.elapsedSeconds / 60
     val elapsedSec = uiState.elapsedSeconds % 60
     val timeFormatted = String.format(LocalLocale.current.platformLocale, "%02d:%02d", elapsedMin, elapsedSec)
+    val targetDistanceText = if (uiState.isMetric) {
+        String.format(LocalLocale.current.platformLocale, "%.2f KM", targetMeters / 1000f)
+    } else {
+        String.format(LocalLocale.current.platformLocale, "%.2f MI", (targetMeters / 1000f) * 0.621371f)
+    }
 
     Column(
         modifier = modifier
@@ -179,7 +184,7 @@ fun RunningScreen(
                     letterSpacing = 0.5.sp
                 )
                 Text(
-                    text = "TARGET: ${String.format(LocalLocale.current.platformLocale, "%.2f KM", targetMeters / 1000f)}",
+                    text = "TARGET: $targetDistanceText",
                     color = ElectricCyan,
                     fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace
@@ -381,15 +386,17 @@ fun RunningScreen(
             )
 
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                val currentDistanceVal = if (uiState.isMetric) totalMeters / 1000f else (totalMeters / 1000f) * 0.621371f
+                val unitLabel = if (uiState.isMetric) "KM" else "MI"
                 Text(
-                    text = String.format(LocalLocale.current.platformLocale, "%.2f", totalMeters / 1000f),
+                    text = String.format(LocalLocale.current.platformLocale, "%.2f", currentDistanceVal),
                     color = if (totalMeters >= targetMeters) EmeraldSuccess else TextPrimary,
                     fontSize = 42.sp,
                     fontWeight = FontWeight.ExtraBold,
                     fontFamily = FontFamily.Monospace
                 )
                 Text(
-                    text = "KM OF ${String.format(LocalLocale.current.platformLocale, "%.2f KM", targetMeters / 1000f)}",
+                    text = "$unitLabel OF $targetDistanceText",
                     color = TextMuted,
                     fontSize = 11.sp,
                     letterSpacing = 0.5.sp,
@@ -464,11 +471,20 @@ fun RunningScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    listOf(
-                        Pair(250f, "+250m"),
-                        Pair(500f, "+500m"),
-                        Pair(1000f, "+1.0 km")
-                    ).forEach { (meters, label) ->
+                    val increments = if (uiState.isMetric) {
+                        listOf(
+                            Pair(250f, "+250m"),
+                            Pair(500f, "+500m"),
+                            Pair(1000f, "+1.0 km")
+                        )
+                    } else {
+                        listOf(
+                            Pair(402.336f, "+0.25 mi"),
+                            Pair(804.672f, "+0.5 mi"),
+                            Pair(1609.34f, "+1.0 mi")
+                        )
+                    }
+                    increments.forEach { (meters, label) ->
                         Box(
                             modifier = Modifier
                                 .weight(1f)

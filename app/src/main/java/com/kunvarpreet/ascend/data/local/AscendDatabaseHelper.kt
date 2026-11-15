@@ -5,6 +5,8 @@ import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import androidx.core.database.sqlite.transaction
+import com.kunvarpreet.ascend.core.sound.SoundFeedbackHelper
 import com.kunvarpreet.ascend.domain.engine.AscendClock
 import com.kunvarpreet.ascend.domain.engine.CatchUpEvaluator
 import com.kunvarpreet.ascend.domain.engine.CatchUpResult
@@ -23,12 +25,14 @@ import com.kunvarpreet.ascend.domain.model.PenaltyLog
 import com.kunvarpreet.ascend.domain.model.QuestRewardEvent
 import com.kunvarpreet.ascend.domain.model.QuestStatus
 import com.kunvarpreet.ascend.domain.model.RankTier
+import com.kunvarpreet.ascend.domain.model.RestDayOfWeek
 import com.kunvarpreet.ascend.domain.model.RunCheckpoint
+import com.kunvarpreet.ascend.domain.model.UnitSystem
+import com.kunvarpreet.ascend.domain.model.UserPreferences
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.UUID
-import androidx.core.database.sqlite.transaction
 
 class AscendDatabaseHelper(
     context: Context,
@@ -54,9 +58,12 @@ class AscendDatabaseHelper(
     private val _inventoryState = MutableStateFlow<List<InventoryItem>>(emptyList())
     val inventoryState: StateFlow<List<InventoryItem>> = _inventoryState.asStateFlow()
 
+    private val _preferencesState = MutableStateFlow(UserPreferences())
+    val preferencesState: StateFlow<UserPreferences> = _preferencesState.asStateFlow()
+
     companion object {
         const val DATABASE_NAME = "ascend_rpg.db"
-        const val DATABASE_VERSION = 5
+        const val DATABASE_VERSION = 6
 
         @Volatile
         private var instance: AscendDatabaseHelper? = null
@@ -228,6 +235,20 @@ class AscendDatabaseHelper(
         """.trimIndent())
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_body_evolution_hunter ON body_evolution_logs(hunter_id, log_date);")
 
+        // Table: user_preferences
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS user_preferences (
+                hunter_id TEXT PRIMARY KEY NOT NULL,
+                use_metric_units INTEGER NOT NULL DEFAULT 1,
+                scheduled_rest_day TEXT NOT NULL DEFAULT 'NONE',
+                daily_reminder_enabled INTEGER NOT NULL DEFAULT 1,
+                daily_reminder_hour INTEGER NOT NULL DEFAULT 22,
+                sound_effects_enabled INTEGER NOT NULL DEFAULT 1,
+                updated_at INTEGER NOT NULL,
+                FOREIGN KEY (hunter_id) REFERENCES hunter_profiles(id) ON DELETE CASCADE
+            );
+        """.trimIndent())
+
         // Seed initial data
         seedInitialData(db)
     }
@@ -283,6 +304,22 @@ class AscendDatabaseHelper(
                 db.execSQL("CREATE INDEX IF NOT EXISTS idx_inventory_hunter ON inventory_items(hunter_id);")
             } catch (_: Exception) {}
         }
+        if (oldVersion < 6) {
+            try {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS user_preferences (
+                        hunter_id TEXT PRIMARY KEY NOT NULL,
+                        use_metric_units INTEGER NOT NULL DEFAULT 1,
+                        scheduled_rest_day TEXT NOT NULL DEFAULT 'NONE',
+                        daily_reminder_enabled INTEGER NOT NULL DEFAULT 1,
+                        daily_reminder_hour INTEGER NOT NULL DEFAULT 22,
+                        sound_effects_enabled INTEGER NOT NULL DEFAULT 1,
+                        updated_at INTEGER NOT NULL,
+                        FOREIGN KEY (hunter_id) REFERENCES hunter_profiles(id) ON DELETE CASCADE
+                    );
+                """.trimIndent())
+            } catch (_: Exception) {}
+        }
         onCreate(db)
     }
 
@@ -328,6 +365,18 @@ class AscendDatabaseHelper(
             put("intelligence", 10)
         }
         db.insert("attribute_stats", null, statValues)
+
+        // Create Default User Preferences
+        val prefValues = ContentValues().apply {
+            put("hunter_id", hunterId)
+            put("use_metric_units", 1)
+            put("scheduled_rest_day", "NONE")
+            put("daily_reminder_enabled", 1)
+            put("daily_reminder_hour", 22)
+            put("sound_effects_enabled", 1)
+            put("updated_at", now)
+        }
+        db.insert("user_preferences", null, prefValues)
 
         // Create Today's Quest Deck using QuestGenerator
         ensureTodayQuestExists(
@@ -404,6 +453,43 @@ class AscendDatabaseHelper(
         }
         statsCursor.close()
 
+        // 2b. Query User Preferences
+        var userPrefs = UserPreferences(hunterId = hunterId)
+        val prefCursor = db.rawQuery(
+            "SELECT use_metric_units, scheduled_rest_day, daily_reminder_enabled, daily_reminder_hour, sound_effects_enabled FROM user_preferences WHERE hunter_id = ? LIMIT 1",
+            arrayOf(hunterId)
+        )
+        if (prefCursor.moveToFirst()) {
+            val useMetric = prefCursor.getInt(0) == 1
+            val restDayStr = prefCursor.getString(1) ?: "NONE"
+            val restDay = try { RestDayOfWeek.valueOf(restDayStr) } catch (_: Exception) { RestDayOfWeek.NONE }
+            val reminderEnabled = prefCursor.getInt(2) == 1
+            val reminderHour = prefCursor.getInt(3)
+            val soundEnabled = prefCursor.getInt(4) == 1
+            userPrefs = UserPreferences(
+                hunterId = hunterId,
+                unitSystem = if (useMetric) UnitSystem.METRIC else UnitSystem.IMPERIAL,
+                scheduledRestDay = restDay,
+                dailyReminderEnabled = reminderEnabled,
+                dailyReminderHour = reminderHour,
+                soundEffectsEnabled = soundEnabled
+            )
+            SoundFeedbackHelper.isSoundEnabled = soundEnabled
+        } else {
+            val defaultCv = ContentValues().apply {
+                put("hunter_id", hunterId)
+                put("use_metric_units", 1)
+                put("scheduled_rest_day", "NONE")
+                put("daily_reminder_enabled", 1)
+                put("daily_reminder_hour", 22)
+                put("sound_effects_enabled", 1)
+                put("updated_at", now)
+            }
+            db.insert("user_preferences", null, defaultCv)
+        }
+        prefCursor.close()
+        _preferencesState.value = userPrefs
+
         // 3. Check if today's quest exists; if not, evaluate catch-up and generate today's quest
         var questCursor = db.rawQuery("SELECT * FROM daily_quests WHERE quest_date = ? LIMIT 1", arrayOf(todayIso))
         if (!questCursor.moveToFirst()) {
@@ -435,13 +521,18 @@ class AscendDatabaseHelper(
             shieldCursor.close()
 
             // Run CatchUpEvaluator
+            val restDayEnum: java.time.DayOfWeek? = if (userPrefs.scheduledRestDay != RestDayOfWeek.NONE) {
+                try { java.time.DayOfWeek.valueOf(userPrefs.scheduledRestDay.name) } catch (_: Exception) { null }
+            } else null
+
             val catchUpResult = CatchUpEvaluator.evaluateCatchUp(
                 lastQuestDate = lastQuestDate,
                 todayDate = todayIso,
                 lastQuestStatus = lastQuestStatus,
                 currentStreak = currentStreak,
                 availableStreakShields = shieldsOwned,
-                difficultyMultiplier = difficultyMultiplier
+                difficultyMultiplier = difficultyMultiplier,
+                scheduledRestDay = restDayEnum
             )
 
             when (catchUpResult) {
@@ -450,6 +541,13 @@ class AscendDatabaseHelper(
                 }
                 is CatchUpResult.StreakContinued -> {
                     // Previous day quest completed: streak continues intact
+                }
+                is CatchUpResult.RestDayExempt -> {
+                    // Scheduled weekly rest day: streak preserved intact without penalty
+                    if (lastQuestDate != null) {
+                        val cv = ContentValues().apply { put("status", QuestStatus.REST_DAY_EXEMPT.name) }
+                        db.update("daily_quests", cv, "hunter_id = ? AND quest_date = ?", arrayOf(hunterId, lastQuestDate))
+                    }
                 }
                 is CatchUpResult.ShieldConsumed -> {
                     val remaining = catchUpResult.shieldsRemaining
@@ -821,6 +919,35 @@ class AscendDatabaseHelper(
             refreshCache()
         }
         return success
+    }
+
+    fun saveUserPreferences(prefs: UserPreferences): Boolean {
+        val db = writableDatabase
+        val now = clock.nowMillis()
+        val hId = prefs.hunterId.ifBlank {
+            _hunterState.value?.id ?: run {
+                val cursor = db.rawQuery("SELECT id FROM hunter_profiles LIMIT 1", null)
+                val id = if (cursor.moveToFirst()) cursor.getString(0) else ""
+                cursor.close()
+                id
+            }
+        }
+        val cv = ContentValues().apply {
+            put("hunter_id", hId)
+            put("use_metric_units", if (prefs.unitSystem == UnitSystem.METRIC) 1 else 0)
+            put("scheduled_rest_day", prefs.scheduledRestDay.name)
+            put("daily_reminder_enabled", if (prefs.dailyReminderEnabled) 1 else 0)
+            put("daily_reminder_hour", prefs.dailyReminderHour)
+            put("sound_effects_enabled", if (prefs.soundEffectsEnabled) 1 else 0)
+            put("updated_at", now)
+        }
+        val rows = db.insertWithOnConflict("user_preferences", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
+        if (rows != -1L) {
+            SoundFeedbackHelper.isSoundEnabled = prefs.soundEffectsEnabled
+            refreshCache()
+            return true
+        }
+        return false
     }
 
     private fun ensureTodayQuestExists(

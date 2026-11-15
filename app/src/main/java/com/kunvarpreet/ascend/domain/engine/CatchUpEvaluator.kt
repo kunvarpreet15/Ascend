@@ -30,6 +30,11 @@ sealed interface CatchUpResult {
         val missedDaysCount: Int,
         val penaltyTaskDescription: String
     ) : CatchUpResult
+
+    /**
+     * Missed day coincided with hunter's scheduled weekly rest day: streak preserved without penalty.
+     */
+    data object RestDayExempt : CatchUpResult
 }
 
 object CatchUpEvaluator {
@@ -39,9 +44,11 @@ object CatchUpEvaluator {
      *
      * @param lastQuestDate ISO-8601 date string (YYYY-MM-DD) of the most recent recorded quest, or null if first run.
      * @param todayDate ISO-8601 date string (YYYY-MM-DD) of today.
-     * @param lastQuestStatus Status of the most recent quest (PENDING, COMPLETED, FAILED, PENALTY_CLEARED).
+     * @param lastQuestStatus Status of the most recent quest (PENDING, COMPLETED, FAILED, PENALTY_CLEARED, REST_DAY_EXEMPT).
      * @param currentStreak Current streak count.
      * @param availableStreakShields Number of streak shields in hunter's possession.
+     * @param difficultyMultiplier Training regimen multiplier (0.5x, 1.0x, 1.5x).
+     * @param scheduledRestDay Hunter's chosen weekly rest day (e.g., SUNDAY), or null if none.
      */
     fun evaluateCatchUp(
         lastQuestDate: String?,
@@ -49,7 +56,8 @@ object CatchUpEvaluator {
         lastQuestStatus: QuestStatus,
         currentStreak: Int,
         availableStreakShields: Int,
-        difficultyMultiplier: Float = 1.0f
+        difficultyMultiplier: Float = 1.0f,
+        scheduledRestDay: java.time.DayOfWeek? = null
     ): CatchUpResult {
         if (lastQuestDate.isNullOrBlank()) {
             return CatchUpResult.NoOpSameDay
@@ -73,13 +81,16 @@ object CatchUpEvaluator {
         }
 
         val isLastQuestDone = lastQuestStatus == QuestStatus.COMPLETED ||
-            lastQuestStatus == QuestStatus.PENALTY_CLEARED
+            lastQuestStatus == QuestStatus.PENALTY_CLEARED ||
+            lastQuestStatus == QuestStatus.REST_DAY_EXEMPT
 
         if (daysBetween == 1) {
             return if (isLastQuestDone) {
                 CatchUpResult.StreakContinued
             } else {
-                if (availableStreakShields > 0) {
+                if (scheduledRestDay != null && lastDate.dayOfWeek == scheduledRestDay) {
+                    CatchUpResult.RestDayExempt
+                } else if (availableStreakShields > 0) {
                     CatchUpResult.ShieldConsumed(shieldsRemaining = availableStreakShields - 1)
                 } else {
                     CatchUpResult.PenaltyTriggered(
@@ -91,15 +102,35 @@ object CatchUpEvaluator {
         }
 
         // Multi-day gap (daysBetween > 1)
-        val missedDays = if (isLastQuestDone) daysBetween - 1 else daysBetween
+        val startDate = if (isLastQuestDone) lastDate.plusDays(1) else lastDate
+        val endDate = today.minusDays(1)
+        val missedDates = mutableListOf<LocalDate>()
+        var d = startDate
+        while (!d.isAfter(endDate)) {
+            missedDates.add(d)
+            d = d.plusDays(1)
+        }
+
+        var exemptCount = 0
+        if (scheduledRestDay != null) {
+            // Count exempt rest days (up to 1 per missed calendar week)
+            val restDaysInGap = missedDates.count { it.dayOfWeek == scheduledRestDay }
+            exemptCount = minOf(restDaysInGap, (missedDates.size + 6) / 7)
+        }
+
+        val chargeableMissedDays = maxOf(0, missedDates.size - exemptCount)
+        if (chargeableMissedDays == 0) {
+            return CatchUpResult.RestDayExempt
+        }
+
         val safeShields = maxOf(0, availableStreakShields)
 
-        return if (safeShields >= missedDays) {
-            CatchUpResult.ShieldConsumed(shieldsRemaining = safeShields - missedDays)
+        return if (safeShields >= chargeableMissedDays) {
+            CatchUpResult.ShieldConsumed(shieldsRemaining = safeShields - chargeableMissedDays)
         } else {
             CatchUpResult.PenaltyTriggered(
-                missedDaysCount = missedDays,
-                penaltyTaskDescription = buildPenaltyDescription(missedDays, difficultyMultiplier)
+                missedDaysCount = chargeableMissedDays,
+                penaltyTaskDescription = buildPenaltyDescription(chargeableMissedDays, difficultyMultiplier)
             )
         }
     }
