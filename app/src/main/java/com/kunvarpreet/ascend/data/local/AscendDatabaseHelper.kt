@@ -18,6 +18,7 @@ import com.kunvarpreet.ascend.domain.model.ExerciseTarget
 import com.kunvarpreet.ascend.domain.model.ExerciseType
 import com.kunvarpreet.ascend.domain.model.ExerciseUnit
 import com.kunvarpreet.ascend.domain.model.HunterProfile
+import com.kunvarpreet.ascend.domain.model.PenaltyLog
 import com.kunvarpreet.ascend.domain.model.QuestRewardEvent
 import com.kunvarpreet.ascend.domain.model.QuestStatus
 import com.kunvarpreet.ascend.domain.model.RankTier
@@ -44,6 +45,12 @@ class AscendDatabaseHelper(
 
     private val _rewardEvent = MutableStateFlow<QuestRewardEvent?>(null)
     val rewardEvent: StateFlow<QuestRewardEvent?> = _rewardEvent.asStateFlow()
+
+    private val _activePenaltyState = MutableStateFlow<PenaltyLog?>(null)
+    val activePenaltyState: StateFlow<PenaltyLog?> = _activePenaltyState.asStateFlow()
+
+    val activePenalty: PenaltyLog?
+        get() = getActivePenalty()
 
     companion object {
         const val DATABASE_NAME = "ascend_rpg.db"
@@ -527,6 +534,47 @@ class AscendDatabaseHelper(
             _todayQuestState.value = quest
         }
         questCursor.close()
+
+        _activePenaltyState.value = getActivePenalty(hunterId)
+    }
+
+    fun getActivePenalty(hunterId: String? = null): PenaltyLog? {
+        val db = readableDatabase
+        val query = if (hunterId != null) {
+            "SELECT id, hunter_id, triggered_date, penalty_task_description, is_cleared, cleared_at, created_at FROM penalty_logs WHERE hunter_id = ? AND is_cleared = 0 ORDER BY created_at DESC LIMIT 1"
+        } else {
+            "SELECT id, hunter_id, triggered_date, penalty_task_description, is_cleared, cleared_at, created_at FROM penalty_logs WHERE is_cleared = 0 ORDER BY created_at DESC LIMIT 1"
+        }
+        val args = if (hunterId != null) arrayOf(hunterId) else null
+        val cursor = db.rawQuery(query, args)
+        val penalty = if (cursor.moveToFirst()) {
+            PenaltyLog(
+                id = cursor.getString(0),
+                hunterId = cursor.getString(1),
+                triggeredDate = cursor.getString(2),
+                penaltyTaskDescription = cursor.getString(3),
+                isCleared = cursor.getInt(4) == 1,
+                clearedAt = if (cursor.isNull(5)) null else cursor.getLong(5),
+                createdAt = cursor.getLong(6)
+            )
+        } else null
+        cursor.close()
+        return penalty
+    }
+
+    fun clearActivePenalty(penaltyId: String): Boolean {
+        val db = writableDatabase
+        val now = clock.nowMillis()
+        val cv = ContentValues().apply {
+            put("is_cleared", 1)
+            put("cleared_at", now)
+        }
+        val rows = db.update("penalty_logs", cv, "id = ?", arrayOf(penaltyId))
+        if (rows > 0) {
+            refreshCache()
+            return true
+        }
+        return false
     }
 
     private fun ensureTodayQuestExists(
