@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.Calendar
+import kotlin.time.Duration.Companion.milliseconds
 
 data class DashboardUiState(
     val hunter: HunterProfile? = null,
@@ -59,7 +60,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             while (true) {
                 _timeRemaining.value = calculateTimeUntilMidnight()
-                delay(1000)
+                delay(1000.milliseconds)
             }
         }
     }

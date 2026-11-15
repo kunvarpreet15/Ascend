@@ -34,7 +34,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kunvarpreet.ascend.domain.model.ExerciseTarget
-import com.kunvarpreet.ascend.domain.model.ExerciseType
 import com.kunvarpreet.ascend.ui.components.HunterHUDHeader
 import com.kunvarpreet.ascend.ui.components.LevelUpRewardModal
 import com.kunvarpreet.ascend.ui.components.QuestDeckCard

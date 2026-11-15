@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.Locale
+import kotlin.time.Duration.Companion.milliseconds
 
 data class WorkoutUiState(
     val target: ExerciseTarget? = null,
@@ -168,7 +169,7 @@ class WorkoutViewModel(
                         )
                     }
                 }
-                delay(500L)
+                delay(500L.milliseconds)
             }
         }
     }

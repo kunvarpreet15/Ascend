@@ -1,10 +1,8 @@
 package com.kunvarpreet.ascend
 
-import com.kunvarpreet.ascend.domain.model.AttributeStats
 import com.kunvarpreet.ascend.domain.model.DailyQuest
 import com.kunvarpreet.ascend.domain.model.ExerciseTarget
 import com.kunvarpreet.ascend.domain.model.ExerciseType
-import com.kunvarpreet.ascend.domain.model.ExerciseUnit
 import com.kunvarpreet.ascend.domain.model.HunterProfile
 import com.kunvarpreet.ascend.domain.model.QuestStatus
 import com.kunvarpreet.ascend.domain.model.RankTier

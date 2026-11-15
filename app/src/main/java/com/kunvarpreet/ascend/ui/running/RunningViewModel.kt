@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.Locale
+import kotlin.time.Duration.Companion.milliseconds
 
 data class RunningUiState(
     val target: ExerciseTarget? = null,
@@ -216,7 +217,7 @@ class RunningViewModel(application: Application) : AndroidViewModel(application)
         indoorTimerJob?.cancel()
         indoorTimerJob = viewModelScope.launch {
             while (isActive && _uiState.value.isRunning) {
-                delay(1000L)
+                delay(1000L.milliseconds)
                 val newElapsed = _uiState.value.elapsedSeconds + 1
                 val meters = _uiState.value.sessionMeters
                 val paceStr = calculatePaceString(meters, newElapsed)

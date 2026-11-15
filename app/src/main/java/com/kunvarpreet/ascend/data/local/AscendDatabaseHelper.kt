@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.UUID
+import androidx.core.database.sqlite.transaction
 
 class AscendDatabaseHelper(
     context: Context,
@@ -539,8 +540,7 @@ class AscendDatabaseHelper(
         val now = clock.nowMillis()
         val questId = UUID.randomUUID().toString()
 
-        db.beginTransaction()
-        try {
+        db.transaction {
             val questValues = ContentValues().apply {
                 put("id", questId)
                 put("hunter_id", hunterId)
@@ -550,7 +550,7 @@ class AscendDatabaseHelper(
                 put("gold_reward", 50)
                 put("created_at", now)
             }
-            db.insert("daily_quests", null, questValues)
+            insert("daily_quests", null, questValues)
 
             val targets = QuestGenerator.generateDailyTargets(
                 questId = questId,
@@ -569,11 +569,8 @@ class AscendDatabaseHelper(
                     put("unit", target.unit.name)
                     put("is_completed", 0)
                 }
-                db.insert("exercise_targets", null, targetValues)
+                insert("exercise_targets", null, targetValues)
             }
-            db.setTransactionSuccessful()
-        } finally {
-            db.endTransaction()
         }
     }
 
@@ -962,10 +959,10 @@ class AscendDatabaseHelper(
         val now = clock.nowMillis()
         var success = false
 
-        db.beginTransaction()
-        try {
+        db.transaction {
             // Ensure workout_session_logs row exists or update it
-            val sessionCursor = db.rawQuery("SELECT id FROM workout_session_logs WHERE id = ?", arrayOf(sessionId))
+            val sessionCursor =
+                rawQuery("SELECT id FROM workout_session_logs WHERE id = ?", arrayOf(sessionId))
             val sessionExists = sessionCursor.moveToFirst()
             sessionCursor.close()
 
@@ -981,7 +978,7 @@ class AscendDatabaseHelper(
                     put("sets_data_json", gpsPathGeoJson)
                     put("created_at", now)
                 }
-                db.insert("workout_session_logs", null, sessionValues)
+                insert("workout_session_logs", null, sessionValues)
             } else {
                 val sessionValues = ContentValues().apply {
                     put("end_time", now)
@@ -989,11 +986,14 @@ class AscendDatabaseHelper(
                     put("duration_seconds", durationSeconds)
                     put("sets_data_json", gpsPathGeoJson)
                 }
-                db.update("workout_session_logs", sessionValues, "id = ?", arrayOf(sessionId))
+                update("workout_session_logs", sessionValues, "id = ?", arrayOf(sessionId))
             }
 
             // Insert or update in-progress run_gps_logs row
-            val gpsCursor = db.rawQuery("SELECT id FROM run_gps_logs WHERE workout_session_id = ?", arrayOf(sessionId))
+            val gpsCursor = rawQuery(
+                "SELECT id FROM run_gps_logs WHERE workout_session_id = ?",
+                arrayOf(sessionId)
+            )
             val gpsExists = gpsCursor.moveToFirst()
             gpsCursor.close()
 
@@ -1010,7 +1010,7 @@ class AscendDatabaseHelper(
                     put("status", "IN_PROGRESS")
                     put("created_at", now)
                 }
-                db.insert("run_gps_logs", null, gpsValues)
+                insert("run_gps_logs", null, gpsValues)
             } else {
                 val gpsValues = ContentValues().apply {
                     put("distance_meters", distanceMeters)
@@ -1019,13 +1019,10 @@ class AscendDatabaseHelper(
                     put("gps_path_geojson", gpsPathGeoJson)
                     put("status", "IN_PROGRESS")
                 }
-                db.update("run_gps_logs", gpsValues, "workout_session_id = ?", arrayOf(sessionId))
+                update("run_gps_logs", gpsValues, "workout_session_id = ?", arrayOf(sessionId))
             }
 
-            db.setTransactionSuccessful()
             success = true
-        } finally {
-            db.endTransaction()
         }
         return success
     }

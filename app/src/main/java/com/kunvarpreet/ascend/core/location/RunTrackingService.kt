@@ -29,6 +29,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * Foreground service managing active GPS outdoor running sessions.
@@ -156,7 +157,7 @@ class RunTrackingService : Service() {
         timerJob?.cancel()
         timerJob = serviceScope.launch {
             while (isActive && _sessionState.value.state == RunState.RUNNING) {
-                delay(1000L)
+                delay(1000L.milliseconds)
                 val updatedSeconds = _sessionState.value.elapsedSeconds + 1
                 val dist = _sessionState.value.distanceMeters
                 val pace = if (dist > 50f && updatedSeconds > 5) {
@@ -294,12 +295,7 @@ class RunTrackingService : Service() {
     }
 
     private fun stopForegroundNotification() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-        } else {
-            @Suppress("DEPRECATION")
-            stopForeground(true)
-        }
+        stopForeground(STOP_FOREGROUND_REMOVE)
         notificationManager.cancel(NOTIFICATION_ID)
     }
 
@@ -354,17 +350,15 @@ class RunTrackingService : Service() {
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Ascend Hunter Run Tracking",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Ongoing GPS tracking and telemetry for distance running quests"
-                setShowBadge(false)
-            }
-            notificationManager.createNotificationChannel(channel)
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "Ascend Hunter Run Tracking",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = "Ongoing GPS tracking and telemetry for distance running quests"
+            setShowBadge(false)
         }
+        notificationManager.createNotificationChannel(channel)
     }
 
     private fun formatGeoJson(points: List<LatLng>): String {
@@ -424,11 +418,7 @@ class RunTrackingService : Service() {
                 putExtra(EXTRA_TARGET_ID, targetId)
                 putExtra(EXTRA_TARGET_DISTANCE, targetDistanceMeters)
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
+            context.startForegroundService(intent)
         }
 
         fun pauseService(context: Context) {

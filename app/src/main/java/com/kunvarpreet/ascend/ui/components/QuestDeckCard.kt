@@ -41,7 +41,6 @@ import com.kunvarpreet.ascend.ui.theme.CardSurface
 import com.kunvarpreet.ascend.ui.theme.ElectricCyan
 import com.kunvarpreet.ascend.ui.theme.EmeraldSuccess
 import com.kunvarpreet.ascend.ui.theme.MonarchGold
-import com.kunvarpreet.ascend.ui.theme.OnElectricCyan
 import com.kunvarpreet.ascend.ui.theme.OnEmeraldSuccess
 import com.kunvarpreet.ascend.ui.theme.TextMuted
 import com.kunvarpreet.ascend.ui.theme.TextPrimary

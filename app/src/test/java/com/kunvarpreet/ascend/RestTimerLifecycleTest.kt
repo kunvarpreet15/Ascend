@@ -2,7 +2,6 @@ package com.kunvarpreet.ascend
 
 import com.kunvarpreet.ascend.domain.engine.FakeAscendClock
 import com.kunvarpreet.ascend.ui.workout.WorkoutUiState
-import com.kunvarpreet.ascend.ui.workout.WorkoutViewModel
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull

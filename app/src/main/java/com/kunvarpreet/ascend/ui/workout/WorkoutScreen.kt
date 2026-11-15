@@ -30,10 +30,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -54,9 +50,6 @@ import com.kunvarpreet.ascend.ui.theme.OnEmeraldSuccess
 import com.kunvarpreet.ascend.ui.theme.TextMuted
 import com.kunvarpreet.ascend.ui.theme.TextPrimary
 import com.kunvarpreet.ascend.ui.theme.VoidBlack
-import kotlinx.coroutines.delay
-import java.util.Locale
-import androidx.compose.ui.platform.LocalLocale
 
 @Composable
 fun WorkoutScreen(
